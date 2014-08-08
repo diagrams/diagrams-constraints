@@ -1,0 +1,16 @@
+dist
+cabal-dev
+*.o
+*.exe
+*.hi
+*.chi
+*.chs.h
+.virtualenv
+*~
+.hsenv_*
+dist_*
+history
+TAGS
+.cabal-sandbox
+cabal.sandbox.config
+/test.svg
