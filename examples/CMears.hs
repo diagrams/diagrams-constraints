@@ -1,8 +1,6 @@
 module CMears where
 
-import Diagrams.Prelude ((#),circle,text,(<>),centerXY,pad,bg,position,white,Diagram,fontSize,Measure(..))
-import qualified Diagrams.Prelude as S
-import qualified Diagrams.Backend.SVG as S
+import Diagrams.Prelude ((#),centerXY,pad,bg,white)
 import Diagrams.Backend.SVG.CmdLine(defaultMain)
 import Diagrams.Constraints
 
@@ -30,12 +28,10 @@ go = do
         ]
 
 -- this just draws labeled circles at the points determined by the solver
-draw :: [Double] -> Diagram S.SVG S.R2
-draw [x1,y1,x2,y2,x3,y3,x4,y4,x5,y5,x6,y6] = 
-   let pairs = [(x1,y1),(x2,y2),(x3,y3),(x4,y4),(x5,y5),(x6,y6)]
-      in position [ (S.p2 pair, circle 10 <> (text (show n) # fontSize (Output 14))) | (pair,n) <- zip pairs [(1 :: Integer)..] ]
-
+draw :: CState
+draw = flip execState def { comp = go } $ mapM_ (unR . render Constraint) ([1..6] :: [Integer])
+  
 main :: IO ()
 main = do
-  sol <- runSolver go (return . draw)
+  sol <- runSolver draw
   defaultMain (sol # centerXY # pad 1.1 # bg white)

@@ -27,13 +27,16 @@
 module Diagrams.Constraints
   -- Re-export some of SBV
   ( SBool, Symbolic, SDouble, Boolean(..), (.==), satWith, z3, solve
-  -- Re-export some of diagrams-lib
-  , r2, mkR2
+  -- Re-export some of diagrams-lib & diagrams-core
+  , r2, mkR2, render
+  -- State stuff
+  , def, execState, unR, CState(..)
   -- Constraint stuff
-  , P2, T2, mkFreeVars,runSolver,spacingX,spacingY,alignAxis,origin
+  , Constraint(..), P2, T2, mkFreeVars,runSolver,spacingX,spacingY,alignAxis,origin
   ) where
 
 import           Control.Lens (view,Wrapped(..),Rewrapped,iso,_1,_2)
+import           Control.Monad.State
 
 import           Diagrams.Coordinates
 import           Diagrams.Core.Types
@@ -41,10 +44,12 @@ import           Diagrams.Core (Transformation,Transformable(..),V,apply)
 import           Diagrams.TwoD.Types
 import qualified Diagrams.Backend.SVG as S
 import qualified Diagrams.Prelude as S
+import Diagrams.Prelude ((#),circle,text,(<>),fontSize)
 
 import           Data.AffineSpace.Point(Point(..))
 import           Data.Basis
 import           Data.Data
+import           Data.Default
 import           Data.SBV(SBool,Symbolic,SDouble,mkSymWord,Quantifier(..),(.==),satWith,z3,solve,extractModel,Boolean(..))
 import           Data.Tree
 import           Data.VectorSpace hiding (project)
@@ -219,25 +224,44 @@ data Constraint = Constraint
 
 type B = Constraint
 
+type instance V Integer = V2 SDouble
+instance Transformable Integer where
+  transform _ = id
+
+instance Renderable Integer Constraint where
+  render Constraint n = R . modify $ \(CS go r) ->
+      CS go
+         (\(y:x:ps) -> do
+            dia <- r ps
+            return $ dia <> (S.moveTo (S.p2 (x,y)) $ circle 10 <> (text (show n) # fontSize (Output 14)))
+         )
+
+data CState = CS { comp :: Symbolic SBool, rFunc :: [Double] -> Result B R2 }
+
+instance Default CState where
+  def = CS (return true) (const (return S.mempty))
+
 instance Backend B R2 where
-  data Render  B R2 = R (Symbolic SBool) ([Double] -> Result B R2)
+  data Render  B R2 = R { unR :: State CState () }
   type Result  B R2 = IO (Diagram S.SVG S.R2)
   data Options B R2 = Options
 
   renderRTree Constraint Options rt = do
-        let R s f = toRender rt
-        runSolver s f
-      where
-        toRender :: Tree (RNode B R2 Annotation) -> Render B R2
-        toRender (Node (RPrim p) _) = undefined p
-        toRender (Node (RStyle sty) ts) = undefined sty ts
-        toRender (Node (RAnnot (Href uri)) rs) = undefined uri rs
-        toRender (Node REmpty rs) = undefined rs
+        let R st = toRender rt
+            cstate = execState st def
+        runSolver cstate
 
-runSolver :: Symbolic SBool -> ([Double] -> Result B R2) -> Result B R2
-runSolver go r = do
+toRender :: Tree (RNode B R2 Annotation) -> Render B R2
+toRender (Node (RPrim p) _) = render Constraint p
+toRender (Node (RStyle sty) ts) = undefined sty ts
+toRender (Node (RAnnot (Href uri)) rs) = undefined uri rs
+toRender (Node REmpty rs) = undefined rs
+
+runSolver :: CState -> Result B R2
+runSolver (CS go r) = do
         putStrLn "Solving..."
         result <- satWith z3 go
         putStrLn (show result)
         let Just model = extractModel result -- TODO: actually match up points
-        r model
+        putStrLn (show model)
+        r (reverse model)

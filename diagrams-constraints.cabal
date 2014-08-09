@@ -34,6 +34,7 @@ Library
                      , sbv           >= 3.1
                      , lens          >= 4.2
                      , mtl           >= 2.2
+                     , data-default
                      , vector-space-points
                      , containers
   Ghc-options:         -Wall
