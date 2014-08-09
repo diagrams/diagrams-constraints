@@ -27,9 +27,13 @@ go = do
         , origin p1
         ]
 
+
 -- this just draws labeled circles at the points determined by the solver
+rtree :: Tree (RNode B R2 Annotation)
+rtree = Node REmpty $ map (flip Node [] . RPrim . Prim) ([1..6] :: [Integer])
+
 draw :: CState
-draw = flip execState def { comp = go } $ mapM_ (unR . render Constraint) ([1..6] :: [Integer])
+draw = flip execState def { comp = go } . unR $ toRender rtree
   
 main :: IO ()
 main = do

@@ -28,11 +28,11 @@ module Diagrams.Constraints
   -- Re-export some of SBV
   ( SBool, Symbolic, SDouble, Boolean(..), (.==), satWith, z3, solve
   -- Re-export some of diagrams-lib & diagrams-core
-  , r2, mkR2, render
+  , r2, mkR2, render, RNode(..), Tree(..), Annotation, Prim(..)
   -- State stuff
   , def, execState, unR, CState(..)
   -- Constraint stuff
-  , Constraint(..), P2, T2, mkFreeVars,runSolver,spacingX,spacingY,alignAxis,origin
+  , Constraint(..), B, R2, P2, T2, mkFreeVars,runSolver,spacingX,spacingY,alignAxis,origin,toRender
   ) where
 
 import           Control.Lens (view,Wrapped(..),Rewrapped,iso,_1,_2)
@@ -224,6 +224,7 @@ data Constraint = Constraint
 
 type B = Constraint
 
+-- Todo: use a real type instead of Integer
 type instance V Integer = V2 SDouble
 instance Transformable Integer where
   transform _ = id
@@ -253,9 +254,7 @@ instance Backend B R2 where
 
 toRender :: Tree (RNode B R2 Annotation) -> Render B R2
 toRender (Node (RPrim p) _) = render Constraint p
-toRender (Node (RStyle sty) ts) = undefined sty ts
-toRender (Node (RAnnot (Href uri)) rs) = undefined uri rs
-toRender (Node REmpty rs) = undefined rs
+toRender (Node REmpty rs) = R $ mapM_ (unR . toRender) rs
 
 runSolver :: CState -> Result B R2
 runSolver (CS go r) = do
