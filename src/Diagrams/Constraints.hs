@@ -28,11 +28,11 @@ module Diagrams.Constraints
   -- Re-export some of SBV
   ( SBool, Symbolic, SDouble, Boolean(..), (.==), satWith, z3, solve
   -- Re-export some of diagrams-lib & diagrams-core
-  , r2, mkR2, render, RNode(..), Tree(..), Annotation, Prim(..)
+  , r2, mkR2, render, RNode(..), Tree(..), Annotation, Prim(..),Backend(..)
   -- State stuff
   , def, execState, unR, CState(..)
   -- Constraint stuff
-  , Constraint(..), B, R2, P2, T2, mkFreeVars,runSolver,spacingX,spacingY,alignAxis,origin,toRender
+  , Constraint(..), Options(..), B, R2, P2, T2, CPrim(..), mkFreeVars,spacingX,spacingY,alignAxis,origin
   ) where
 
 import           Control.Lens (view,Wrapped(..),Rewrapped,iso,_1,_2)
@@ -223,6 +223,22 @@ spacing _ _ = error "spacing: not enough values"
 data Constraint = Constraint
 
 type B = Constraint
+
+-- | Primitive constraint operation
+data CPrim = CPrim (Symbolic SBool) deriving (Typeable)
+
+type instance V CPrim = V2 SDouble
+instance Transformable CPrim where
+  transform _ = id
+
+instance Renderable CPrim Constraint where
+  render Constraint (CPrim x) = R . modify $ \(CS go r) ->
+      CS (do
+            y <- go
+            x' <- x
+            return $ x' &&& y
+         )
+         r
 
 -- Todo: use a real type instead of Integer
 type instance V Integer = V2 SDouble

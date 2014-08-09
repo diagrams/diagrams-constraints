@@ -4,7 +4,7 @@ import Diagrams.Prelude ((#),centerXY,pad,bg,white)
 import Diagrams.Backend.SVG.CmdLine(defaultMain)
 import Diagrams.Constraints
 
--- https://github.com/diagrams/diagrams-lib/issues/8#issuecomment-16298660 ported to SBV
+-- based on https://github.com/diagrams/diagrams-lib/issues/8#issuecomment-16298660
 
 -- the layout specification
 go :: Symbolic SBool
@@ -30,12 +30,9 @@ go = do
 
 -- this just draws labeled circles at the points determined by the solver
 rtree :: Tree (RNode B R2 Annotation)
-rtree = Node REmpty $ map (flip Node [] . RPrim . Prim) ([1..6] :: [Integer])
+rtree = Node REmpty $ map (flip Node [] . RPrim . Prim) ([1..6] :: [Integer]) ++ [Node (RPrim (Prim (CPrim go))) []]
 
-draw :: CState
-draw = flip execState def { comp = go } . unR $ toRender rtree
-  
 main :: IO ()
 main = do
-  sol <- runSolver draw
+  sol <- renderRTree Constraint Options rtree
   defaultMain (sol # centerXY # pad 1.1 # bg white)
