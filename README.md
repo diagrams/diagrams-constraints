@@ -3,12 +3,25 @@ _diagrams-constraints_ is a backend for [diagrams] that implements constraint so
 
 # Installation
 
-cabal sandbox add-source the generalize-double branches of diagrams-lib and diagrams-svg, then run
+cabal sandbox add-source the generalize-double branches of diagrams-lib and diagrams-svg.
+
+You will also have to download and patch sbv; change
+```
+  -- * Symbolic computations
+  , Symbolic, output, SymWord(..)
+```
+to
+```
+  -- * Symbolic computations
+  , Symbolic, output, SymWord(..), Quantifier(..)
+```
+
+Finally, run
 ```
 cabal install
 ```
 
-This should download the sbv library as well as the other Haskell dependencies.
+This should download the rest of the Haskell dependencies.
 
 To actually run it, you will need to install [Z3] as well (latest nightly a.k.a. "4.3.2", accessible through the "Planned" releases), and point
 sbv to it by setting the SBV_Z3 environment variable to the path of the executable.
@@ -18,4 +31,10 @@ So far, the code has only been tested on Windows.
 
 # Usage
 
-cabal repl, play around. Some files have main functions.
+```
+cabal repl
+:load CMears
+:main --output test.svg
+```
+
+Pull requests welcome.

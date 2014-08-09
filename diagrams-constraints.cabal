@@ -1,5 +1,5 @@
 Name:                diagrams-constraints
-Version:             0.1
+Version:             0.0.1
 Synopsis:            constraints backend
 Homepage:            http://projects.haskell.org/diagrams/
 License:             BSD3
@@ -34,5 +34,6 @@ Library
                      , sbv           >= 3.1
                      , lens          >= 4.2
                      , mtl           >= 2.2
+                     , vector-space-points
   Ghc-options:         -Wall
   Default-language:  Haskell2010
