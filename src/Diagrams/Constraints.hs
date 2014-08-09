@@ -44,12 +44,13 @@ import           Diagrams.Core (Transformation,Transformable(..),V,apply)
 import           Diagrams.TwoD.Types
 import qualified Diagrams.Backend.SVG as S
 import qualified Diagrams.Prelude as S
-import Diagrams.Prelude ((#),circle,text,(<>),fontSize)
+import Diagrams.Prelude ((#),circle,text,fontSize)
 
 import           Data.AffineSpace.Point(Point(..))
 import           Data.Basis
 import           Data.Data
 import           Data.Default
+import           Data.Monoid
 import           Data.SBV(SBool,Symbolic,SDouble,mkSymWord,Quantifier(..),(.==),satWith,z3,solve,extractModel,Boolean(..))
 import           Data.Tree
 import           Data.VectorSpace hiding (project)
@@ -225,20 +226,22 @@ data Constraint = Constraint
 type B = Constraint
 
 -- | Primitive constraint operation
-data CPrim = CPrim (Symbolic SBool) deriving (Typeable)
-
+data CPrim = CPrim { runCPrim :: Symbolic SBool } deriving (Typeable)
 type instance V CPrim = V2 SDouble
+
+instance Monoid CPrim where
+  mempty = CPrim $ return true
+  (CPrim x) `mappend` (CPrim go) = CPrim $ do
+            y <- go
+            x' <- x
+            return $ x' &&& y
+
 instance Transformable CPrim where
   transform _ = id
 
 instance Renderable CPrim Constraint where
-  render Constraint (CPrim x) = R . modify $ \(CS go r) ->
-      CS (do
-            y <- go
-            x' <- x
-            return $ x' &&& y
-         )
-         r
+  render Constraint x = R . modify $ \(CS go r) ->
+      CS (x `mappend` go) r
 
 -- Todo: use a real type instead of Integer
 type instance V Integer = V2 SDouble
@@ -253,10 +256,10 @@ instance Renderable Integer Constraint where
             return $ dia <> (S.moveTo (S.p2 (x,y)) $ circle 10 <> (text (show n) # fontSize (Output 14)))
          )
 
-data CState = CS { comp :: Symbolic SBool, rFunc :: [Double] -> Result B R2 }
+data CState = CS { comp :: CPrim, rFunc :: [Double] -> Result B R2 }
 
 instance Default CState where
-  def = CS (return true) (const (return S.mempty))
+  def = CS mempty (const (return S.mempty))
 
 instance Backend B R2 where
   data Render  B R2 = R { unR :: State CState () }
@@ -275,7 +278,7 @@ toRender (Node REmpty rs) = R $ mapM_ (unR . toRender) rs
 runSolver :: CState -> Result B R2
 runSolver (CS go r) = do
         putStrLn "Solving..."
-        result <- satWith z3 go
+        result <- satWith z3 (runCPrim go)
         putStrLn (show result)
         let Just model = extractModel result -- TODO: actually match up points
         putStrLn (show model)

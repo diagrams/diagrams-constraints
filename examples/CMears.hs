@@ -27,7 +27,6 @@ go = do
         , origin p1
         ]
 
-
 -- this just draws labeled circles at the points determined by the solver
 rtree :: Tree (RNode B R2 Annotation)
 rtree = Node REmpty $ map (flip Node [] . RPrim . Prim) ([1..6] :: [Integer]) ++ [Node (RPrim (Prim (CPrim go))) []]
