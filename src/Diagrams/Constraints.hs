@@ -24,19 +24,31 @@
 -- Laying out diagrams using constraints.
 -----------------------------------------------------------------------------
 
-module Diagrams.Constraints(SDouble,Symbolic,SBool,(.==),mkFreeVars,satWith,z3,solve,extractModel,spacingX,spacingY,alignAxis,origin,Boolean(..),r2,mkR2,P2,T2) where
+module Diagrams.Constraints
+  -- Re-export some of SBV
+  ( SBool, Symbolic, SDouble, Boolean(..), (.==), satWith, z3, solve
+  -- Re-export some of diagrams-lib
+  , r2, mkR2
+  -- Constraint stuff
+  , P2, T2, mkFreeVars,runSolver,spacingX,spacingY,alignAxis,origin
+  ) where
 
-import           Control.Lens (view,Wrapped(..),Rewrapped,iso,makeLenses,_1,_2)
+import           Control.Lens (view,Wrapped(..),Rewrapped,iso,_1,_2)
 
 import           Diagrams.Coordinates
+import           Diagrams.Core.Types
 import           Diagrams.Core (Transformation,Transformable(..),V,apply)
-import           Data.AffineSpace.Point(Point(..))
 import           Diagrams.TwoD.Types
+import qualified Diagrams.Backend.SVG as S
+import qualified Diagrams.Prelude as S
 
+import           Data.AffineSpace.Point(Point(..))
 import           Data.Basis
 import           Data.Data
 import           Data.SBV(SBool,Symbolic,SDouble,mkSymWord,Quantifier(..),(.==),satWith,z3,solve,extractModel,Boolean(..))
+import           Data.Tree
 import           Data.VectorSpace hiding (project)
+
 
 type instance V SDouble = SDouble
 
@@ -202,32 +214,30 @@ spacing sp (x:y:[]) = y - x .== sp
 spacing sp (x:y:xs) = y - x .== sp &&& spacing sp (y:xs)
 spacing _ _ = error "spacing: not enough values"
 
-{-
+-- | Constraint type token
+data Constraint = Constraint
 
-instance Backend B (V2 a) where
-  data Render  B V2 = R SvgRenderM
-  type Result  SVG V2 = S.Svg
-  data Options SVG V2 = SVGOptions
-                        { _size :: SizeSpec2D SDouble  -- ^ The requested size.
-                        , _svgDefinitions :: Maybe S.Svg
-                          -- ^ Custom definitions that will be added to the @defs@
-                          --   section of the output.
-                        }
+type B = Constraint
 
-  renderRTree _ opts rt = evalState svgOutput initialSvgRenderState
-    where
-      svgOutput = do
-        let R r = toRender rt
-            (w,h) = sizePair (opts^.size)
-        svg <- r
-        return $ R.svgHeader w h (opts^.svgDefinitions) $ svg
+instance Backend B R2 where
+  data Render  B R2 = R (Symbolic SBool) ([Double] -> Result B R2)
+  type Result  B R2 = IO (Diagram S.SVG S.R2)
+  data Options B R2 = Options
 
-  adjustDia c opts d = adjustDia2D size c opts (d # reflectY)
+  renderRTree Constraint Options rt = do
+        let R s f = toRender rt
+        runSolver s f
+      where
+        toRender :: Tree (RNode B R2 Annotation) -> Render B R2
+        toRender (Node (RPrim p) _) = undefined p
+        toRender (Node (RStyle sty) ts) = undefined sty ts
+        toRender (Node (RAnnot (Href uri)) rs) = undefined uri rs
+        toRender (Node REmpty rs) = undefined rs
 
-data ConstraintState = ConstraintState { test :: Bool }
-
-makeLenses ''ConstraintState
-
-initialConstraintState :: ConstraintState
-initialConstraintState = ConstraintState True
--}
+runSolver :: Symbolic SBool -> ([Double] -> Result B R2) -> Result B R2
+runSolver go r = do
+        putStrLn "Solving..."
+        result <- satWith z3 go
+        putStrLn (show result)
+        let Just model = extractModel result -- TODO: actually match up points
+        r model

@@ -29,17 +29,7 @@ go = do
         , origin p1
         ]
 
-aSolution :: IO [Double]
-aSolution = do
-  putStrLn "Solving..."
-  result <- satWith z3 go
-  putStrLn (show result)
-  let Just model = extractModel result -- TODO: actually match up points
-  return model
-  
-
--- this just draws labeled circles at the points determined by the
--- solver
+-- this just draws labeled circles at the points determined by the solver
 draw :: [Double] -> Diagram S.SVG S.R2
 draw [x1,y1,x2,y2,x3,y3,x4,y4,x5,y5,x6,y6] = 
    let pairs = [(x1,y1),(x2,y2),(x3,y3),(x4,y4),(x5,y5),(x6,y6)]
@@ -47,5 +37,5 @@ draw [x1,y1,x2,y2,x3,y3,x4,y4,x5,y5,x6,y6] =
 
 main :: IO ()
 main = do
-  sol <- aSolution
-  defaultMain (draw sol # centerXY # pad 1.1 # bg white)
+  sol <- runSolver go (return . draw)
+  defaultMain (sol # centerXY # pad 1.1 # bg white)

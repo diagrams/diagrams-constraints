@@ -35,5 +35,6 @@ Library
                      , lens          >= 4.2
                      , mtl           >= 2.2
                      , vector-space-points
+                     , containers
   Ghc-options:         -Wall
   Default-language:  Haskell2010
