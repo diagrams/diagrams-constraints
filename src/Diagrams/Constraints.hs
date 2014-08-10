@@ -24,21 +24,15 @@
 -- Laying out diagrams using constraints.
 -----------------------------------------------------------------------------
 
-module Diagrams.Constraints
-  -- Re-export some of SBV
-  ( SBool, Symbolic, SDouble, Boolean(..), (.==), satWith, z3, solve
-  -- Re-export some of diagrams-lib & diagrams-core
-  , r2, mkR2, render, RNode(..), Tree(..), Annotation, Prim(..),Backend(..)
-  -- State stuff
-  , def, execState, unR, CState(..)
-  -- Constraint stuff
-  , Constraint(..), Options(..), B, R2, P2, T2, CPrim(..), mkFreeVars,spacingX,spacingY,alignAxis,origin
-  ) where
+module Diagrams.Constraints where
 
+import           Control.Applicative
 import           Control.Lens (view,Wrapped(..),Rewrapped,iso,_1,_2)
+import           Control.Monad.Reader
 import           Control.Monad.State
 
 import           Diagrams.Coordinates
+import           Diagrams.Core.Names
 import           Diagrams.Core.Types
 import           Diagrams.Core (Transformation,Transformable(..),V,apply)
 import           Diagrams.TwoD.Types
@@ -50,8 +44,10 @@ import           Data.AffineSpace.Point(Point(..))
 import           Data.Basis
 import           Data.Data
 import           Data.Default
+import           Data.Map(Map)
+import qualified Data.Map as M
 import           Data.Monoid
-import           Data.SBV(SBool,Symbolic,SDouble,mkSymWord,Quantifier(..),(.==),satWith,z3,solve,extractModel,Boolean(..))
+import           Data.SBV(SBool,Symbolic,SDouble,mkSymWord,Quantifier(..),(.==),satWith,z3,extractModel,Boolean(..))
 import           Data.Tree
 import           Data.VectorSpace hiding (project)
 
@@ -226,12 +222,19 @@ data Constraint = Constraint
 type B = Constraint
 
 -- | Primitive constraint operation
-data CPrim = CPrim { runCPrim :: Symbolic SBool } deriving (Typeable)
 type instance V CPrim = V2 SDouble
+data CPrim = CPrim { variables :: [Name], cprimF :: ReaderT (Map Name SDouble) Symbolic SBool } deriving (Typeable)
+
+runCPrim :: CPrim -> Symbolic SBool
+runCPrim (CPrim vars fun) = do
+  varMap <- M.fromList <$> flip mapM vars (\n -> do
+    var <- free (show n) :: Symbolic SDouble
+    return (n,var))
+  runReaderT fun varMap
 
 instance Monoid CPrim where
-  mempty = CPrim $ return true
-  (CPrim x) `mappend` (CPrim go) = CPrim $ do
+  mempty = CPrim mempty $ return true
+  (CPrim v1 x) `mappend` (CPrim v2 go) = CPrim (v1++v2) $ do
             y <- go
             x' <- x
             return $ x' &&& y
