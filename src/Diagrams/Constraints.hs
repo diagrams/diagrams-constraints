@@ -46,6 +46,7 @@ import           Data.Data
 import           Data.Default
 import           Data.Map(Map)
 import qualified Data.Map as M
+import           Data.Maybe(fromJust)
 import           Data.Monoid
 import           Data.SBV hiding ((#))
 import           Data.Set (Set)
@@ -184,13 +185,6 @@ type B = Constraint
 type instance V CPrim = V2 SDouble
 data CPrim = CPrim { variables :: Set Name, cprimF :: ReaderT (Map Name SDouble) Symbolic SBool } deriving (Typeable)
 
-runCPrim :: CPrim -> Symbolic SBool
-runCPrim (CPrim vars fun) = do
-  varMap <- M.fromList <$> flip mapM (Set.elems vars) (\n -> do
-    var <- free (show n) :: Symbolic SDouble
-    return (n,var))
-  runReaderT fun varMap
-
 instance Monoid CPrim where
   mempty = CPrim mempty $ return true
   (CPrim v1 x) `mappend` (CPrim v2 go) = CPrim (v1 <> v2) $ do
@@ -205,20 +199,23 @@ instance Renderable CPrim Constraint where
   render Constraint x = R . modify $ \(CS go r) ->
       CS (x `mappend` go) r
 
--- Todo: use a real type instead of Integer
-type instance V Integer = V2 SDouble
-instance Transformable Integer where
+data Circle v = Circle Integer v
+type instance V (Circle v) = R2
+instance Transformable (Circle v) where
   transform _ = id
 
-instance Renderable Integer Constraint where
-  render Constraint n = R . modify $ \(CS go r) ->
-      CS go
-         (\(y:x:ps) -> do
-            dia <- r ps
-            return $ dia <> (S.moveTo (S.p2 (x,y)) $ circle 10 <> (text (show n) # fontSize (Output 14)))
-         )
+instance Renderable (Circle (V2 Name)) Constraint where
+  render Constraint (Circle n (V2 x y)) = R . modify $ \(CS go r) ->
+      CS go (tweak r)
+    where
+      tweak r mp = do
+          dia <- r mp
+          return $ dia <> (S.moveTo (S.p2 (x',y')) $ circle 10 <> (text (show n) # fontSize (Output 14)))
+        where
+          Just x' = M.lookup x mp
+          Just y' = M.lookup y mp
 
-data CState = CS { comp :: CPrim, rFunc :: [Double] -> Result B R2 }
+data CState = CS { comp :: CPrim, rFunc :: Map Name Double -> Result B R2 }
 
 instance Default CState where
   def = CS mempty (const (return S.mempty))
@@ -238,10 +235,16 @@ toRender (Node (RPrim p) _) = render Constraint p
 toRender (Node REmpty rs) = R $ mapM_ (unR . toRender) rs
 
 runSolver :: CState -> Result B R2
-runSolver (CS go r) = do
+runSolver (CS (CPrim vars fun) r) = do
         putStrLn "Solving..."
-        result <- satWith z3 (runCPrim go)
+        let varL = Set.elems vars
+        result <- satWith z3 $ do
+          varMap <- M.fromList <$> flip mapM varL (\n -> do
+            var <- free (show n) :: Symbolic SDouble
+            return (n,var))
+          runReaderT fun varMap
         putStrLn (show result)
-        let Just model = extractModel result -- TODO: actually match up points
+        let strmodel = getModelDictionary result
+            model = M.fromList (zip varL (map (fromCW . fromJust . flip M.lookup strmodel . show) varL))
         putStrLn (show model)
-        r (reverse model)
+        r model
