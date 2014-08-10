@@ -4,6 +4,8 @@
 {-# LANGUAGE StandaloneDeriving    #-}
 {-# LANGUAGE TemplateHaskell       #-}
 {-# LANGUAGE DeriveFunctor         #-}
+{-# LANGUAGE DeriveFoldable        #-}
+{-# LANGUAGE DeriveTraversable     #-}
 {-# LANGUAGE DeriveDataTypeable         #-}
 {-# LANGUAGE GADTs                      #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
@@ -26,10 +28,12 @@
 
 module Diagrams.Constraints where
 
+import Prelude hiding (mapM, mapM_)
+
 import           Control.Applicative
 import           Control.Lens (view,Wrapped(..),Rewrapped,iso,_1,_2)
-import           Control.Monad.Reader
-import           Control.Monad.State
+import           Control.Monad.Reader(ReaderT,asks,runReaderT)
+import           Control.Monad.State(State,modify,execState)
 
 import           Diagrams.Coordinates
 import           Diagrams.Core.Names
@@ -44,16 +48,22 @@ import           Data.AffineSpace.Point(Point(..))
 import           Data.Basis
 import           Data.Data
 import           Data.Default
+import           Data.Foldable
 import           Data.Map(Map)
 import qualified Data.Map as M
 import           Data.Maybe(fromJust)
 import           Data.Monoid
-import           Data.SBV hiding ((#))
+import           Data.SBV hiding ((#),(.==))
+import qualified Data.SBV as SBV ((.==))
 import           Data.Set (Set)
 import qualified Data.Set as Set
+import           Data.Traversable
 import           Data.Tree
 import           Data.VectorSpace hiding (project)
 
+deriving instance Foldable Point
+deriving instance Traversable Point
+deriving instance Typeable SBV
 
 type instance V SDouble = SDouble
 
@@ -78,7 +88,7 @@ instance Transformable SDouble where
   transform = apply
 
 data V2 a = V2 a a
-  deriving (Eq, Typeable, Functor)
+  deriving (Eq, Typeable, Functor, Foldable, Traversable)
 
 type ScalarR2 a = (Num a, Fractional a, ScalarR2Sym a, Show a)
 
@@ -157,49 +167,85 @@ type R2 = V2 SDouble
 type P2 = Point R2
 type T2 = Transformation R2
 
-origin :: P2 -> SBool
-origin p = view _x p .== 0 &&& view _y p .== 0
-
-spacingX :: SDouble -> [P2] -> SBool
-spacingX sp xs = spacing sp $ map (view _x) xs
-
-spacingY :: SDouble -> [P2] -> SBool
-spacingY sp xs = spacing sp $ map (view _y) xs
-
-alignAxis :: R2 -> [P2] -> SBool
-alignAxis axis xs = spacing 0 $ map project xs -- TODO: allow stuff besides 0
-  where
-    project (P v) = (axis <.> v)
-
-spacing :: SDouble -> [SDouble] -> SBool
-spacing sp (x:y:[]) = y - x .== sp
-spacing sp (x:y:xs) = y - x .== sp &&& spacing sp (y:xs)
-spacing _ _ = error "spacing: not enough values"
+type P2N = Point (V2 Name)
 
 -- | Constraint type token
 data Constraint = Constraint
 
 type B = Constraint
 
+-- CPrim' is Applicative. I think it might have other instances, but I can't tell.
+data CPrim' x = CPrim { variables :: (Set Name), cFunc :: ReaderT (Map Name SDouble) Symbolic x } deriving (Typeable, Functor)
+
+type instance V (CPrim' x) = V2 SDouble
+
+instance Applicative CPrim' where
+  pure = CPrim mempty . pure
+  (CPrim v1 f) <*> (CPrim v2 x) = CPrim (v1 <> v2) (f <*> x)
+
+newtype BAll b = BAll {getBAll :: b }
+  deriving (Eq, Ord, Read, Show, Bounded, Boolean, Typeable)
+
+infix 4 .==
+(.==) :: (EqSymbolic a) => a -> a -> BAll SBool
+x .== y = BAll $ (SBV..==) x y
+
+instance Boolean b => Monoid (BAll b) where
+  mempty = BAll true
+  BAll x `mappend` BAll y = BAll (x &&& y)
+
 -- | Primitive constraint operation
-type instance V CPrim = V2 SDouble
-data CPrim = CPrim { variables :: Set Name, cprimF :: ReaderT (Map Name SDouble) Symbolic SBool } deriving (Typeable)
+type CPrim = CPrim' (BAll SBool)
 
-instance Monoid CPrim where
-  mempty = CPrim mempty $ return true
-  (CPrim v1 x) `mappend` (CPrim v2 go) = CPrim (v1 <> v2) $ do
-            y <- go
-            x' <- x
-            return $ x' &&& y
+instance Monoid x => Monoid (CPrim' x) where
+  mempty = pure mempty
+  (CPrim v1 x) `mappend` (CPrim v2 go) = CPrim (v1 <> v2) $ liftA2 (<>) x go
 
-instance Transformable CPrim where
+instance Transformable (CPrim' x) where
   transform _ = id
 
 instance Renderable CPrim Constraint where
   render Constraint x = R . modify $ \(CS go r) ->
       CS (x `mappend` go) r
 
-data Circle v = Circle Integer v
+class NumberLike n where
+  toNumber :: n -> CPrim' SDouble
+
+instance NumberLike SDouble where
+  toNumber = pure
+
+instance NumberLike Double where
+  toNumber = pure . literal
+
+instance NumberLike Name where
+  toNumber n = CPrim (Set.singleton n) $ (fromJust <$> asks (M.lookup n))
+
+wrapP :: (NumberLike n) => Point (V2 n) -> CPrim' P2
+wrapP p' = traverse (traverse toNumber) p'
+
+origin :: (NumberLike n) => Point (V2 n) -> CPrim
+origin p' = origin' <$> wrapP p'
+  where
+    origin' :: P2 -> BAll SBool
+    origin' p = view _x p .== 0 &&& view _y p .== 0
+
+spacing :: SDouble -> [SDouble] -> BAll SBool
+spacing sp (x:y:xs) = y - x .== sp &&& spacing sp (y:xs)
+spacing _ [_] = true
+spacing _ [] = error "spacing: not enough values"
+
+spacingX :: (NumberLike n) => SDouble -> [Point (V2 n)] -> CPrim
+spacingX sp xs = spacing <$> toNumber sp <*> (map (view _x) <$> traverse wrapP xs)
+
+spacingY :: (NumberLike n) => SDouble -> [Point (V2 n)] -> CPrim
+spacingY sp xs = spacing <$> toNumber sp <*> (map (view _y) <$> traverse wrapP xs)
+
+alignAxis :: (NumberLike n) => R2 -> [Point (V2 n)] -> CPrim
+alignAxis axis xs = spacing 0 <$> traverse (\x -> project <$> traverse toNumber axis <*> wrapP x) xs -- TODO: allow stuff besides 0
+  where
+    project ax (P v) = (ax <.> v)
+
+data Circle v = Circle Integer v deriving (Typeable)
 type instance V (Circle v) = R2
 instance Transformable (Circle v) where
   transform _ = id
@@ -242,7 +288,8 @@ runSolver (CS (CPrim vars fun) r) = do
           varMap <- M.fromList <$> flip mapM varL (\n -> do
             var <- free (show n) :: Symbolic SDouble
             return (n,var))
-          runReaderT fun varMap
+          BAll b <- runReaderT fun varMap
+          return b
         putStrLn (show result)
         let strmodel = getModelDictionary result
             model = M.fromList (zip varL (map (fromCW . fromJust . flip M.lookup strmodel . show) varL))
