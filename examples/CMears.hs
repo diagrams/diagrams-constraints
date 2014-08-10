@@ -11,6 +11,7 @@ import           Data.AffineSpace.Point(Point(..))
 import           Data.Map(Map)
 import qualified Data.Map as M
 import           Data.SBV(SDouble,solve)
+import qualified Data.Set as Set
 import           Data.Tree
 
 import Diagrams.Backend.SVG.CmdLine(defaultMain)
@@ -20,7 +21,7 @@ import Diagrams.Constraints
 
 -- the layout specification
 go :: CPrim
-go = CPrim (concat ptvars) $ do
+go = CPrim (Set.fromList $ concat ptvars) $ do
        Just [p1,p2,p3,p4,p5,p6] <- asks mkPts
        lift $ solve
         -- 1-4 evenly spaced on X axis, spacing is 50

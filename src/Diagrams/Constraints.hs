@@ -47,7 +47,9 @@ import           Data.Default
 import           Data.Map(Map)
 import qualified Data.Map as M
 import           Data.Monoid
-import           Data.SBV(SBool,Symbolic,SDouble,mkSymWord,Quantifier(..),(.==),satWith,z3,extractModel,Boolean(..))
+import           Data.SBV hiding ((#))
+import           Data.Set (Set)
+import qualified Data.Set as Set
 import           Data.Tree
 import           Data.VectorSpace hiding (project)
 
@@ -150,49 +152,6 @@ instance (ScalarR2 a) => HasY (V2 a) where
 instance (ScalarR2 a) => Transformable (V2 a) where
   transform = apply
 
-
-class Sym a where
-  {-# MINIMAL mkSym #-}
-  mkSym :: Maybe Quantifier -> Maybe String -> Symbolic a
-  symbolics :: [String] -> Symbolic [a]
-  symbolics      = mapM symbolic
-  symbolic  :: String -> Symbolic a
-  symbolic       = free
-  mkFreeVars n   = mapM (const free_)   [1 .. n]
-  mkFreeVars :: Int -> Symbolic [a]
-  mkForallVars n = mapM (const forall_) [1 .. n]
-  mkForallVars :: Int -> Symbolic [a]
-  mkExistVars n  = mapM (const exists_) [1 .. n]
-  mkExistVars :: Int -> Symbolic [a]
-  free_ :: Symbolic a
-  free_    = mkSym Nothing      Nothing
-  free :: String -> Symbolic a
-  free     = mkSym Nothing    . Just
-  forall_ :: Symbolic a
-  forall_  = mkSym (Just ALL)   Nothing
-  forall :: String -> Symbolic a
-  forall   = mkSym (Just ALL) . Just
-  exists_ :: Symbolic a
-  exists_  = mkSym (Just EX)    Nothing
-  exists  :: String -> Symbolic a
-  exists   = mkSym (Just EX)  . Just
-
-instance Sym SDouble where
-  mkSym = mkSymWord
-
-instance (Sym a) => Sym (V2 a) where
-  mkSym q n = do
-      x <- mkSym q (add n "x")
-      y <- mkSym q (add n "y")
-      return (V2 x y)
-    where
-      add = flip $ \x -> maybe Nothing $ \s -> Just (s ++ x)
-  
-instance (Sym a) => Sym (Point a) where
-  mkSym q n = do
-      v <- mkSym q n
-      return (P v)
-
 type R2 = V2 SDouble
 type P2 = Point R2
 type T2 = Transformation R2
@@ -223,18 +182,18 @@ type B = Constraint
 
 -- | Primitive constraint operation
 type instance V CPrim = V2 SDouble
-data CPrim = CPrim { variables :: [Name], cprimF :: ReaderT (Map Name SDouble) Symbolic SBool } deriving (Typeable)
+data CPrim = CPrim { variables :: Set Name, cprimF :: ReaderT (Map Name SDouble) Symbolic SBool } deriving (Typeable)
 
 runCPrim :: CPrim -> Symbolic SBool
 runCPrim (CPrim vars fun) = do
-  varMap <- M.fromList <$> flip mapM vars (\n -> do
+  varMap <- M.fromList <$> flip mapM (Set.elems vars) (\n -> do
     var <- free (show n) :: Symbolic SDouble
     return (n,var))
   runReaderT fun varMap
 
 instance Monoid CPrim where
   mempty = CPrim mempty $ return true
-  (CPrim v1 x) `mappend` (CPrim v2 go) = CPrim (v1++v2) $ do
+  (CPrim v1 x) `mappend` (CPrim v2 go) = CPrim (v1 <> v2) $ do
             y <- go
             x' <- x
             return $ x' &&& y
