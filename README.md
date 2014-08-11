@@ -3,20 +3,9 @@ _diagrams-constraints_ is a backend for [diagrams] that implements constraint so
 
 # Installation
 
-cabal sandbox add-source the generalize-double branches of diagrams-lib and diagrams-svg.
+cabal sandbox add-source the no-data branch of diagrams-core ad the generalize-double branches of diagrams-lib and diagrams-svg.
 
-You will also have to download and patch sbv; change
-```
-  -- * Symbolic computations
-  , Symbolic, output, SymWord(..)
-```
-to
-```
-  -- * Symbolic computations
-  , Symbolic, output, SymWord(..), Quantifier(..)
-```
-
-Finally, run
+Run
 ```
 cabal install
 ```

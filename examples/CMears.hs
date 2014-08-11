@@ -6,8 +6,6 @@ import           Diagrams.Core.Compile
 import Diagrams.Prelude ((#),centerXY,pad,bg,white)
 
 import           Data.AffineSpace.Point(Point(..))
-import           Data.Maybe
-import           Data.Tree
 import qualified Data.Tree.DUAL            as D
 import           Data.Monoid
 import           Data.Monoid.MList(empty)
@@ -54,5 +52,5 @@ dia = mconcat . map toQD $ map Prim (reverse circs) ++ map Prim go
 
 main :: IO ()
 main = do
-  sol <- renderRTree Constraint Options (fromDTree . fromMaybe (Node DEmpty []) $ toDTree (undefined :: CDouble) (undefined :: CDouble) dia)
+  sol <- renderDia Constraint Options dia
   defaultMain (sol # centerXY # pad 1.1 # bg white)

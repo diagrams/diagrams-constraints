@@ -180,13 +180,6 @@ instance Applicative CPrim' where
 instance Show (CPrim' x) where
   show (CPrim _ _) = "<CPrim>" -- TODO
 
--- Fake instances to quiet GHC
-instance Eq (CPrim' x) where
-  _ == _ = error "cannot compare CPrim' values"
-
-instance Ord (CPrim' x) where
-  compare _ _ = error "cannot compare CPrim' values"
-
 -- | Primitive constraint operation
 type CPrim = CPrim' SBool
 
@@ -229,6 +222,16 @@ type T2 = Transformation R2
 instance EqSymbolic CDouble where
   (.==) = liftA2 (SBV..==)
   (./=) = liftA2 (SBV../=)
+
+-- | Bogus Eq instance
+instance Eq CDouble where
+  _ == _ = error "cannot compare CPrim' values"
+
+-- | This instance supports only min/max
+instance Ord CDouble where
+  compare _ _ = error "cannot compare CPrim' values"
+  min = liftA2 smin
+  max = liftA2 smax
 
 instance Num CDouble where
   (+) = liftA2 (+)
