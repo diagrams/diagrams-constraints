@@ -2,6 +2,7 @@ module CMears where
 
 import           Diagrams.Core.Names
 import           Diagrams.Core.Types
+import           Diagrams.Core.Compile
 import Diagrams.Prelude ((#),centerXY,pad,bg,white)
 
 import           Data.AffineSpace.Point(Point(..))
@@ -13,8 +14,8 @@ import Diagrams.Constraints
 -- based on https://github.com/diagrams/diagrams-lib/issues/8#issuecomment-16298660
 
 -- this just draws labeled circles at the points determined by the solver
-rtree :: Tree (RNode B R2 Annotation)
-rtree = Node REmpty $ map (flip Node [] . RPrim . Prim) circs ++ map (flip Node [] . RPrim . Prim) go
+dtree :: DTree B R2 Annotation
+dtree = Node DEmpty . map (flip Node [] . DPrim) $ map Prim circs ++ map Prim go
   where
     -- the layout specification
     go :: [CPrim]
@@ -46,5 +47,5 @@ rtree = Node REmpty $ map (flip Node [] . RPrim . Prim) circs ++ map (flip Node 
 
 main :: IO ()
 main = do
-  sol <- renderRTree Constraint Options rtree
+  sol <- renderRTree Constraint Options (fromDTree dtree)
   defaultMain (sol # centerXY # pad 1.1 # bg white)
