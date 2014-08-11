@@ -53,7 +53,7 @@ import           Data.Map(Map)
 import qualified Data.Map as M
 import           Data.Maybe(fromJust)
 import           Data.Monoid
-import           Data.SBV hiding ((#),EqSymbolic(..))
+import           Data.SBV hiding ((#),EqSymbolic(..),(.>))
 import qualified Data.SBV as SBV
 import           Data.Set (Set)
 import qualified Data.Set as Set
@@ -164,7 +164,9 @@ instance (ScalarR2 a) => Transformable (V2 a) where
   transform = apply
 
 -- | Constraint type token
-data Constraint = Constraint
+data Constraint = Constraint deriving (Typeable, Eq, Ord, Show)
+
+instance IsName Constraint -- for generated names
 
 type B = Constraint
 
@@ -187,8 +189,7 @@ instance Transformable CPrim where
   transform _ = id
 
 instance Renderable CPrim Constraint where
-  render Constraint x = R . modify $ \(CS go r) ->
-      CS (x <> go) r
+  render Constraint x = R . modify $ \cs -> cs { comp = x <> comp cs}
 
 instance Boolean CPrim where
   true = pure true
@@ -300,24 +301,36 @@ spacing _ _ = error "spacing: not enough values"
 
 data Circle v = Circle Integer v deriving (Typeable)
 type instance V (Circle v) = v
-instance Transformable (Circle v) where
-  transform _ = id
+instance (Transformable v, v ~ V v, VectorSpace v) => Transformable (Circle v) where
+  transform tr (Circle i v) = Circle i (transform tr v)
 
 instance Renderable (Circle R2) Constraint where
-  render Constraint (Circle n (V2 x y)) = R . modify $ \(CS go r) ->
-      CS go (tweak r) -- TODO
-    where
-      tweak r mp = do
-          dia <- r mp
-          return $ dia <> (S.moveTo (S.p2 (x',y')) $ circle 10 <> (text (show n) # fontSize (Output 14)))
-        where
-          Just x' = M.lookup x mp
-          Just y' = M.lookup y mp
+  render Constraint (Circle n (V2 xc yc)) = R . modify $ f
+   where
+    f cs = cs
+            { comp = comp cs <> ((CPrim (Set.fromList [xname, yname]) $ do
+                 (x,y) <- asks getPt
+                 return $ \x' y' -> (SBV.&&&) ((SBV..==) x x') ((SBV..==) y y')
+               ) <*> xc <*> yc)
+            , rFunc = tweak (rFunc cs)
+            , nameSupply = nameSupply cs + 2 }
+     where
+      xname = Constraint .> nameSupply cs
+      yname = Constraint .> nameSupply cs + 1
+      tweak r = do
+        dia <- r
+        pt <- asks getPt
+        return $ dia <> (S.moveTo (S.p2 pt) $ circle 10 <> (text (show n) # fontSize (Output 14)))
+      getPt :: Map Name d -> (d,d)
+      getPt mp = (x,y)
+       where
+        Just x = M.lookup xname mp
+        Just y = M.lookup yname mp
 
-data CState = CS { comp :: CPrim, rFunc :: Map Name Double -> Result B R2 }
+data CState = CS { comp :: CPrim, rFunc :: ReaderT (Map Name Double) IO (Diagram S.SVG S.R2), nameSupply :: Integer }
 
 instance Default CState where
-  def = CS mempty (const (return S.mempty))
+  def = CS mempty (return S.mempty) 0
 
 instance Backend B R2 where
   data Render  B R2 = R { unR :: State CState () }
@@ -334,7 +347,7 @@ toRender (Node (RPrim p) _) = render Constraint p
 toRender (Node REmpty rs) = R $ mapM_ (unR . toRender) rs
 
 runSolver :: CState -> Result B R2
-runSolver (CS (CPrim vars fun) r) = do
+runSolver (CS (CPrim vars fun) r _) = do
         putStrLn "Solving..."
         let varL = Set.elems vars
         result <- satWith z3 $ do
@@ -347,4 +360,4 @@ runSolver (CS (CPrim vars fun) r) = do
         let strmodel = getModelDictionary result
             model = M.fromList (zip varL (map (fromCW . fromJust . flip M.lookup strmodel . show) varL))
         putStrLn (show model)
-        r model
+        runReaderT r model
