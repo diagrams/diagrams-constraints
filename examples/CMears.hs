@@ -36,12 +36,13 @@ rtree = Node REmpty $ map (flip Node [] . RPrim . Prim) circs ++ map (flip Node 
     [p1,p2,p3,p4,p5,p6] = mkPts
     nums = [1..6] :: [Integer]
     pts = map (("p"++) . show) nums
-    ptvars :: [[Name]]
-    ptvars = [ map toName [pt++"x",pt++"y"] | pt <- pts]
-    mkPts :: [P2N]
-    mkPts = map (\[x,y] -> P $ V2 x y) ptvars
-    circs :: [Circle (V2 Name)]
-    circs = map (\(i,[x,y]) -> Circle i (V2 x y)) (zip nums ptvars)
+    toCD = deref . toName
+    ptvars :: [R2]
+    ptvars = [ V2 (toCD (pt++"x")) (toCD (pt++"y")) | pt <- pts]
+    mkPts :: [P2]
+    mkPts = map P ptvars
+    circs :: [Circle R2]
+    circs = map (\(i,p) -> Circle i p) (zip nums ptvars)
 
 main :: IO ()
 main = do

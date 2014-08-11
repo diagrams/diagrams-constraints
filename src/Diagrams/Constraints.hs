@@ -53,8 +53,8 @@ import           Data.Map(Map)
 import qualified Data.Map as M
 import           Data.Maybe(fromJust)
 import           Data.Monoid
-import           Data.SBV hiding ((#),(.==))
-import qualified Data.SBV as SBV ((.==))
+import           Data.SBV hiding ((#),EqSymbolic(..))
+import qualified Data.SBV as SBV
 import           Data.Set (Set)
 import qualified Data.Set as Set
 import           Data.Traversable
@@ -163,12 +163,6 @@ instance (ScalarR2 a) => HasY (V2 a) where
 instance (ScalarR2 a) => Transformable (V2 a) where
   transform = apply
 
-type R2 = V2 SDouble
-type P2 = Point R2
-type T2 = Transformation R2
-
-type P2N = Point (V2 Name)
-
 -- | Constraint type token
 data Constraint = Constraint
 
@@ -177,82 +171,141 @@ type B = Constraint
 -- CPrim' is Applicative. I think it might have other instances, but I can't tell.
 data CPrim' x = CPrim { variables :: (Set Name), cFunc :: ReaderT (Map Name SDouble) Symbolic x } deriving (Typeable, Functor)
 
-type instance V (CPrim' x) = V2 SDouble
-
 instance Applicative CPrim' where
   pure = CPrim mempty . pure
   (CPrim v1 f) <*> (CPrim v2 x) = CPrim (v1 <> v2) (f <*> x)
 
-newtype BAll b = BAll {getBAll :: b }
-  deriving (Eq, Ord, Read, Show, Bounded, Boolean, Typeable)
-
-infix 4 .==
-(.==) :: (EqSymbolic a) => a -> a -> BAll SBool
-x .== y = BAll $ (SBV..==) x y
-
-instance Boolean b => Monoid (BAll b) where
-  mempty = BAll true
-  BAll x `mappend` BAll y = BAll (x &&& y)
+instance Show (CPrim' x) where
+  show (CPrim _ _) = "<CPrim>" -- TODO
 
 -- | Primitive constraint operation
-type CPrim = CPrim' (BAll SBool)
+type CPrim = CPrim' SBool
 
-instance Monoid x => Monoid (CPrim' x) where
-  mempty = pure mempty
-  (CPrim v1 x) `mappend` (CPrim v2 go) = CPrim (v1 <> v2) $ liftA2 (<>) x go
+type instance V CPrim = R2
 
-instance Transformable (CPrim' x) where
+instance Transformable CPrim where
   transform _ = id
 
 instance Renderable CPrim Constraint where
   render Constraint x = R . modify $ \(CS go r) ->
-      CS (x `mappend` go) r
+      CS (x <> go) r
 
-class NumberLike n where
-  toNumber :: n -> CPrim' SDouble
+instance Boolean CPrim where
+  true = pure true
+  false = pure false
+  bnot = fmap bnot
+  (&&&) = liftA2 (&&&)
+  (|||) = liftA2 (|||)
+  (~&) = liftA2 (~&)
+  (~|) = liftA2 (~|)
+  (<+>) = liftA2 (<+>)
+  (==>) = liftA2 (==>)
+  (<=>) = liftA2 (<=>)
+  fromBool = pure . fromBool
+  
+instance Monoid CPrim where
+  mempty = true
+  mappend = (&&&)
 
-instance NumberLike SDouble where
-  toNumber = pure
+infix 4 .==, ./=
 
-instance NumberLike Double where
-  toNumber = pure . literal
+class EqSymbolic a where
+  (.==) :: (EqSymbolic a) => a -> a -> CPrim
+  (./=) :: (EqSymbolic a) => a -> a -> CPrim
 
-instance NumberLike Name where
-  toNumber n = CPrim (Set.singleton n) $ (fromJust <$> asks (M.lookup n))
+type CDouble = CPrim' SDouble
+type R2 = V2 CDouble
+type P2 = Point R2
+type T2 = Transformation R2
 
-wrapP :: (NumberLike n) => Point (V2 n) -> CPrim' P2
-wrapP p' = traverse (traverse toNumber) p'
+instance EqSymbolic CDouble where
+  (.==) = liftA2 (SBV..==)
+  (./=) = liftA2 (SBV../=)
 
-origin :: (NumberLike n) => Point (V2 n) -> CPrim
-origin p' = origin' <$> wrapP p'
+instance Num CDouble where
+  (+) = liftA2 (+)
+  (-) = liftA2 (-)
+  (*) = liftA2 (*)
+  negate = fmap negate
+  abs = fmap abs
+  signum = fmap signum
+  fromInteger = pure . fromInteger
+
+instance Fractional CDouble where
+  (/) = liftA2 (/)
+  recip = fmap recip
+  fromRational = pure . fromRational
+
+instance Floating CDouble where
+  pi = pure pi
+  exp = fmap exp
+  log = fmap log
+  sqrt = fmap sqrt
+  (**) = liftA2 (**)
+  logBase = liftA2 logBase
+  sin = fmap sin
+  cos = fmap cos
+  tan = fmap tan
+  asin = fmap asin
+  acos = fmap acos
+  atan = fmap atan
+  sinh = fmap sinh
+  cosh = fmap cosh
+  asinh = fmap asinh
+  acosh = fmap acosh
+  atanh = fmap atanh
+  
+type instance V CDouble = CDouble
+
+instance AdditiveGroup CDouble where
+  zeroV = pure zeroV
+  (^+^) = liftA2 (^+^)
+  negateV = fmap negateV
+
+instance VectorSpace CDouble where
+  type Scalar CDouble = CDouble
+  (*^) = liftA2 (*^)
+
+instance InnerSpace CDouble where (<.>) = liftA2 (<.>)
+instance HasBasis CDouble where
+  type Basis CDouble = Basis SDouble
+  basisValue = pure . basisValue
+  decompose s = [((),s)]
+  decompose' s   = const s
+
+instance Transformable CDouble where
+  transform = apply
+
+deref :: Name -> CDouble
+deref n = CPrim (Set.singleton n) $ (fromJust <$> asks (M.lookup n))
+
+origin :: P2 -> CPrim
+origin p = view _x p .== 0 &&& view _y p .== 0
+
+spacingX :: CDouble -> [P2] -> CPrim
+spacingX sp xs = spacing sp $ map (view _x) xs
+
+spacingY :: CDouble -> [P2] -> CPrim
+spacingY sp xs = spacing sp $ map (view _y) xs
+
+alignAxis :: R2 -> [P2] -> CPrim
+alignAxis axis xs = spacing 0 $ map project xs -- TODO: allow stuff besides 0
   where
-    origin' :: P2 -> BAll SBool
-    origin' p = view _x p .== 0 &&& view _y p .== 0
+    project (P v) = (axis <.> v)
 
-spacing :: SDouble -> [SDouble] -> BAll SBool
+spacing :: CDouble -> [CDouble] -> CPrim
+spacing sp (x:y:[]) = y - x .== sp
 spacing sp (x:y:xs) = y - x .== sp &&& spacing sp (y:xs)
-spacing _ [_] = true
-spacing _ [] = error "spacing: not enough values"
-
-spacingX :: (NumberLike n) => SDouble -> [Point (V2 n)] -> CPrim
-spacingX sp xs = spacing <$> toNumber sp <*> (map (view _x) <$> traverse wrapP xs)
-
-spacingY :: (NumberLike n) => SDouble -> [Point (V2 n)] -> CPrim
-spacingY sp xs = spacing <$> toNumber sp <*> (map (view _y) <$> traverse wrapP xs)
-
-alignAxis :: (NumberLike n) => R2 -> [Point (V2 n)] -> CPrim
-alignAxis axis xs = spacing 0 <$> traverse (\x -> project <$> traverse toNumber axis <*> wrapP x) xs -- TODO: allow stuff besides 0
-  where
-    project ax (P v) = (ax <.> v)
+spacing _ _ = error "spacing: not enough values"
 
 data Circle v = Circle Integer v deriving (Typeable)
-type instance V (Circle v) = R2
+type instance V (Circle v) = v
 instance Transformable (Circle v) where
   transform _ = id
 
-instance Renderable (Circle (V2 Name)) Constraint where
+instance Renderable (Circle R2) Constraint where
   render Constraint (Circle n (V2 x y)) = R . modify $ \(CS go r) ->
-      CS go (tweak r)
+      CS go (tweak r) -- TODO
     where
       tweak r mp = do
           dia <- r mp
@@ -288,7 +341,7 @@ runSolver (CS (CPrim vars fun) r) = do
           varMap <- M.fromList <$> flip mapM varL (\n -> do
             var <- free (show n) :: Symbolic SDouble
             return (n,var))
-          BAll b <- runReaderT fun varMap
+          b <- runReaderT fun varMap
           return b
         putStrLn (show result)
         let strmodel = getModelDictionary result
