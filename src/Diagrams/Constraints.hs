@@ -180,6 +180,13 @@ instance Applicative CPrim' where
 instance Show (CPrim' x) where
   show (CPrim _ _) = "<CPrim>" -- TODO
 
+-- Fake instances to quiet GHC
+instance Eq (CPrim' x) where
+  _ == _ = error "cannot compare CPrim' values"
+
+instance Ord (CPrim' x) where
+  compare _ _ = error "cannot compare CPrim' values"
+
 -- | Primitive constraint operation
 type CPrim = CPrim' SBool
 

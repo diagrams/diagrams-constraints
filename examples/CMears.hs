@@ -6,16 +6,23 @@ import           Diagrams.Core.Compile
 import Diagrams.Prelude ((#),centerXY,pad,bg,white)
 
 import           Data.AffineSpace.Point(Point(..))
+import           Data.Maybe
 import           Data.Tree
+import qualified Data.Tree.DUAL            as D
+import           Data.Monoid
+import           Data.Monoid.MList(empty)
 
 import Diagrams.Backend.SVG.CmdLine(defaultMain)
 import Diagrams.Constraints
 
 -- based on https://github.com/diagrams/diagrams-lib/issues/8#issuecomment-16298660
 
+toQD :: Prim b v -> QDiagram b v m
+toQD p = QD $ D.leaf empty (PrimLeaf p)
+
 -- this just draws labeled circles at the points determined by the solver
-dtree :: DTree B R2 Annotation
-dtree = Node DEmpty . map (flip Node [] . DPrim) $ map Prim circs ++ map Prim go
+dia :: Diagram B R2
+dia = mconcat . map toQD $ map Prim (reverse circs) ++ map Prim go
   where
     -- the layout specification
     go :: [CPrim]
@@ -47,5 +54,5 @@ dtree = Node DEmpty . map (flip Node [] . DPrim) $ map Prim circs ++ map Prim go
 
 main :: IO ()
 main = do
-  sol <- renderRTree Constraint Options (fromDTree dtree)
+  sol <- renderRTree Constraint Options (fromDTree . fromMaybe (Node DEmpty []) $ toDTree (undefined :: CDouble) (undefined :: CDouble) dia)
   defaultMain (sol # centerXY # pad 1.1 # bg white)

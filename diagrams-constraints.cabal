@@ -36,6 +36,7 @@ Library
                      , mtl           >= 2.2
                      , data-default
                      , vector-space-points
-                     , containers
+                     , containers, dual-tree
+                     , monoid-extras
   Ghc-options:         -Wall
   Default-language:  Haskell2010
