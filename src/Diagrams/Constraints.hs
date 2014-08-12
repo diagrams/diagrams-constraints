@@ -31,7 +31,7 @@ module Diagrams.Constraints where
 import Prelude hiding (mapM, mapM_)
 
 import           Control.Applicative
-import           Control.Lens (view,Wrapped(..),Rewrapped,iso,_1,_2)
+import           Control.Lens (view,Wrapped(..),Rewrapped,iso,_1,_2,(^.))
 import           Control.Monad.Reader(ReaderT,asks,runReaderT)
 import           Control.Monad.State(State,modify,execState)
 
@@ -39,6 +39,7 @@ import           Diagrams.Coordinates
 import           Diagrams.Core.Names
 import           Diagrams.Core.Types
 import           Diagrams.Core (Transformation,Transformable(..),V,apply)
+import           Diagrams.Angle
 import           Diagrams.TwoD.Types
 import qualified Diagrams.Backend.SVG as S
 import qualified Diagrams.Prelude as S
@@ -51,9 +52,9 @@ import           Data.Default
 import           Data.Foldable
 import           Data.Map(Map)
 import qualified Data.Map as M
-import           Data.Maybe(fromJust)
+import           Data.Maybe(fromJust,fromMaybe)
 import           Data.Monoid
-import           Data.SBV hiding ((#),EqSymbolic(..),(.>))
+import           Data.SBV hiding ((#),EqSymbolic(..),(.>),name)
 import qualified Data.SBV as SBV
 import           Data.Set (Set)
 import qualified Data.Set as Set
@@ -63,6 +64,7 @@ import           Data.VectorSpace hiding (project)
 
 deriving instance Foldable Point
 deriving instance Traversable Point
+instance IsName R2Basis
 deriving instance Typeable SBV
 
 type instance V SDouble = SDouble
@@ -90,7 +92,7 @@ instance Transformable SDouble where
 data V2 a = V2 a a
   deriving (Eq, Typeable, Functor, Foldable, Traversable)
 
-type ScalarR2 a = (Num a, Fractional a, ScalarR2Sym a, Show a)
+type ScalarR2 a = (ScalarR2Ish a)
 
 instance (ScalarR2 a) => AdditiveGroup (V2 a) where
   zeroV = V2 0 0
@@ -113,7 +115,7 @@ instance (ScalarR2 a) => Fractional (V2 a) where
   fromRational r = V2 r' r'
     where r' = fromRational r
 
-instance (ScalarR2 a) => Show (V2 a) where
+instance (ScalarR2 a, Show a) => Show (V2 a) where
   showsPrec p (V2 x y) = showParen (p >= 7) $
     showCoord x . showString " ^& " . showCoord y
    where
@@ -159,6 +161,17 @@ instance (ScalarR2 a) => HasX (V2 a) where
 
 instance (ScalarR2 a) => HasY (V2 a) where
     _y = r2Iso . _2
+
+instance (ScalarR2 a) => HasTheta (V2 a) where
+    _theta = polar._2
+
+instance (ScalarR2 a) => HasR (V2 a) where
+    _r = polar._1
+
+instance (ScalarR2 a) => Polar (V2 a) where
+    polar =
+        iso (\v -> ( magnitude v, atan2A (v^._y) (v^._x)))
+            (\(r,θ) -> V2 (r * cosA θ) (r * sinA θ))
 
 instance (ScalarR2 a) => Transformable (V2 a) where
   transform = apply
@@ -265,7 +278,29 @@ instance Floating CDouble where
   asinh = fmap asinh
   acosh = fmap acosh
   atanh = fmap atanh
-  
+
+instance Real CDouble where
+  toRational = error "cannot read from CDouble"
+
+instance RealFrac CDouble where
+  properFraction = error "cannot read from CDouble"
+
+instance RealFloat CDouble where
+  floatRadix = error "cannot read from CDouble"
+  floatDigits = error "cannot read from CDouble"
+  floatRange = error "cannot read from CDouble"
+  decodeFloat = error "cannot read from CDouble"
+  encodeFloat a b = pure $ encodeFloat a b
+  exponent = error "cannot read from CDouble"
+  significand = fmap significand
+  scaleFloat i = fmap (scaleFloat i)
+  isNaN = error "cannot read from CDouble"
+  isInfinite = error "cannot read from CDouble"
+  isDenormalized = error "cannot read from CDouble"
+  isNegativeZero = error "cannot read from CDouble"
+  isIEEE = error "cannot read from CDouble"
+  atan2 = liftA2 atan2
+
 type instance V CDouble = CDouble
 
 instance AdditiveGroup CDouble where
@@ -290,6 +325,9 @@ instance Transformable CDouble where
 deref :: Name -> CDouble
 deref n = CPrim (Set.singleton n) $ (fromJust <$> asks (M.lookup n))
 
+constraint :: CPrim -> Prim B R2
+constraint = Prim
+
 origin :: P2 -> CPrim
 origin p = view _x p .== 0 &&& view _y p .== 0
 
@@ -309,13 +347,13 @@ spacing sp (x:y:[]) = y - x .== sp
 spacing sp (x:y:xs) = y - x .== sp &&& spacing sp (y:xs)
 spacing _ _ = error "spacing: not enough values"
 
-data Circle v = Circle Integer v deriving (Typeable)
+data Circle v = Circle (Maybe Name) Integer v deriving (Typeable)
 type instance V (Circle v) = v
 instance (Transformable v, v ~ V v, VectorSpace v) => Transformable (Circle v) where
-  transform tr (Circle i v) = Circle i (transform tr v)
+  transform tr (Circle nm i v) = Circle nm i (transform tr v)
 
 instance Renderable (Circle R2) Constraint where
-  render Constraint (Circle n (V2 xc yc)) = R . modify $ f
+  render Constraint (Circle mbname n (V2 xc yc)) = R . modify $ f
    where
     f cs = cs
             { comp = comp cs <> ((CPrim (Set.fromList [xname, yname]) $ do
@@ -323,10 +361,11 @@ instance Renderable (Circle R2) Constraint where
                  return $ \x' y' -> (SBV.&&&) ((SBV..==) x x') ((SBV..==) y y')
                ) <*> xc <*> yc)
             , rFunc = tweak (rFunc cs)
-            , nameSupply = nameSupply cs + 2 }
+            , nameSupply = maybe (nameSupply cs + 1) (const $ nameSupply cs) mbname }
      where
-      xname = Constraint .> nameSupply cs
-      yname = Constraint .> nameSupply cs + 1
+      name = fromMaybe (Constraint .> nameSupply cs) mbname
+      xname = name .> XB
+      yname = name .> YB
       tweak r = do
         dia <- r
         pt <- asks getPt
@@ -358,7 +397,6 @@ toRender (Node REmpty rs) = R $ mapM_ (unR . toRender) rs
 
 runSolver :: CState -> Result B R2
 runSolver (CS (CPrim vars fun) r _) = do
-        putStrLn "Solving..."
         let varL = Set.elems vars
         result <- satWith z3 $ do
           varMap <- M.fromList <$> flip mapM varL (\n -> do
@@ -366,7 +404,6 @@ runSolver (CS (CPrim vars fun) r _) = do
             return (n,var))
           b <- runReaderT fun varMap
           return b
-        putStrLn (show result)
         let strmodel = getModelDictionary result
             model = M.fromList (zip varL (map (fromCW . fromJust . flip M.lookup strmodel . show) varL))
         putStrLn (show model)

@@ -9,6 +9,7 @@ import           Data.AffineSpace.Point(Point(..))
 import qualified Data.Tree.DUAL            as D
 import           Data.Monoid
 import           Data.Monoid.MList(empty)
+import           Data.SBV(bAnd)
 
 import Diagrams.Backend.SVG.CmdLine(defaultMain)
 import Diagrams.Constraints
@@ -20,11 +21,11 @@ toQD p = QD $ D.leaf empty (PrimLeaf p)
 
 -- this just draws labeled circles at the points determined by the solver
 dia :: Diagram B R2
-dia = mconcat . map toQD $ map Prim (reverse circs) ++ map Prim go
+dia = mconcat . map toQD $ map Prim (reverse circs) ++ [go]
   where
     -- the layout specification
-    go :: [CPrim]
-    go = -- 1-4 evenly spaced on X axis, spacing is 50
+    go = constraint $ bAnd
+         -- 1-4 evenly spaced on X axis, spacing is 50
          [ spacingX 50 [p1,p2,p3,p4]
          -- 1-4 same on Y axis
          , spacingY 0 [p1,p2,p3,p4]
@@ -48,7 +49,7 @@ dia = mconcat . map toQD $ map Prim (reverse circs) ++ map Prim go
     mkPts :: [P2]
     mkPts = map P ptvars
     circs :: [Circle R2]
-    circs = map (\(i,p) -> Circle i p) (zip nums ptvars)
+    circs = map (\(n,i,p) -> Circle (Just $ toName n) i p) (zip3 pts nums ptvars)
 
 main :: IO ()
 main = do

@@ -3,7 +3,9 @@ _diagrams-constraints_ is a backend for [diagrams] that implements constraint so
 
 # Installation
 
-cabal sandbox add-source the no-data branch of diagrams-core ad the generalize-double branches of diagrams-lib and diagrams-svg.
+cabal sandbox add-source the no-data branch of diagrams-core and the generalize-double branches of diagrams-lib and diagrams-svg and the [more instances] branch of sbv.
+[more instances]: https://github.com/Mathnerd314/sbv.git
+
 
 Run
 ```
