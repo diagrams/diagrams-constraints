@@ -31,9 +31,12 @@ module Diagrams.Constraints where
 import Prelude hiding (mapM, mapM_)
 
 import           Control.Applicative
-import           Control.Lens (view,Wrapped(..),Rewrapped,iso,_1,_2,(^.))
-import           Control.Monad.Reader(ReaderT,asks,runReaderT)
+import           Control.Lens.Type
+import           Control.Lens.Wrapped
+import           Control.Lens(iso,view,(^.),from,mapping,_1,_2)
+import           Control.Monad.Reader(Reader,reader,runReader,ReaderT(..),asks)
 import           Control.Monad.State(State,modify,execState)
+import           Data.Functor.Compose
 
 import           Diagrams.Coordinates
 import           Diagrams.Core.Names
@@ -54,8 +57,7 @@ import           Data.Map(Map)
 import qualified Data.Map as M
 import           Data.Maybe(fromJust,fromMaybe)
 import           Data.Monoid
-import           Data.SBV hiding ((#),EqSymbolic(..),(.>),name)
-import qualified Data.SBV as SBV
+import           Data.SBV hiding ((#),(.>),name)
 import           Data.Set (Set)
 import qualified Data.Set as Set
 import           Data.Traversable
@@ -64,6 +66,10 @@ import           Data.VectorSpace hiding (project)
 
 deriving instance Foldable Point
 deriving instance Traversable Point
+
+instance (EqSymbolic v) => EqSymbolic (Point v) where
+  (P a) .== (P b) = a .== b
+
 instance IsName R2Basis
 deriving instance Typeable SBV
 
@@ -176,6 +182,9 @@ instance (ScalarR2 a) => Polar (V2 a) where
 instance (ScalarR2 a) => Transformable (V2 a) where
   transform = apply
 
+instance (EqSymbolic a) => EqSymbolic (V2 a) where
+  (V2 x1 y1) .== (V2 x2 y2) = x1 .== x2 &&& y1 .== y2
+
 -- | Constraint type token
 data Constraint = Constraint deriving (Typeable, Eq, Ord, Show)
 
@@ -183,58 +192,71 @@ instance IsName Constraint -- for generated names
 
 type B = Constraint
 
--- CPrim' is Applicative. I think it might have other instances, but I can't tell.
-data CPrim' x = CPrim { variables :: (Set Name), cFunc :: ReaderT (Map Name SDouble) Symbolic x } deriving (Typeable, Functor)
+-- A large Applicative stack
+type CFunc d s = ReaderT (Map Name d) (Compose Maybe s)
 
-instance Applicative CPrim' where
+instance Show (CFunc d s x) where
+  show _ = "<CFunc>" -- TODO
+
+runCFunc :: CFunc d s x -> Map Name d -> Maybe (s x)
+runCFunc f mp = getCompose $ runReaderT f mp
+
+-- Lenses to make my life easier
+
+readerLens :: Iso' (r -> a) (Reader r a)
+readerLens = iso reader runReader
+
+_comp :: Iso' (CFunc d s x) (Reader (Map Name d) (Maybe (s x)))
+_comp = _Wrapped . readerLens . mapping _Wrapped
+
+-- CPrim' is Applicative and Alternative
+data CPrim'' d s x = CPrim { variables :: (Set Name), cFunc :: CFunc d s x } deriving (Typeable, Functor, Show)
+
+type CPrim' = CPrim'' SDouble Symbolic
+
+instance Applicative s => Applicative (CPrim'' d s) where
   pure = CPrim mempty . pure
   (CPrim v1 f) <*> (CPrim v2 x) = CPrim (v1 <> v2) (f <*> x)
 
-instance Show (CPrim' x) where
-  show (CPrim _ _) = "<CPrim>" -- TODO
+-- | The Alternative instance is left-biased, due to the underlying Maybe.
+instance Applicative s => Alternative (CPrim'' d s) where
+  empty = CPrim mempty empty
+  (CPrim v1 a) <|> (CPrim v2 b) = CPrim (v1 <> v2) (a <|> b)
 
--- | Primitive constraint operation
 type CPrim = CPrim' SBool
 
-type instance V CPrim = R2
+-- | Primitive constraint operation
+newtype CPrimPrim = ConstraintPrim { getConstraint :: CPrim' SBool } deriving (Typeable,Show)
 
-instance Transformable CPrim where
+type instance V CPrimPrim = R2
+
+instance Transformable CPrimPrim where
   transform _ = id
 
-instance Renderable CPrim Constraint where
-  render Constraint x = R . modify $ \cs -> cs { comp = x <> comp cs}
+instance Renderable CPrimPrim Constraint where
+  render Constraint (ConstraintPrim x) = R . modify $ \cs -> cs { comp = x &&& comp cs}
+
+-- We lift the operators with left/right identities to consider empty as the identity
+lift2 :: (SBool -> SBool -> SBool) -> CPrim -> (CPrim -> CPrim -> CPrim)
+lift2 f df a b = liftA2 f (a <|> df) (b <|> df)
 
 instance Boolean CPrim where
   true = pure true
   false = pure false
   bnot = fmap bnot
-  (&&&) = liftA2 (&&&)
-  (|||) = liftA2 (|||)
+  (&&&) = lift2 (&&&) true
+  (|||) = lift2 (|||) false
   (~&) = liftA2 (~&)
   (~|) = liftA2 (~|)
-  (<+>) = liftA2 (<+>)
-  (==>) = liftA2 (==>)
-  (<=>) = liftA2 (<=>)
+  (<+>) = lift2 (<+>) false
+  x ==> y = liftA2 (==>) (x <|> true) y
+  (<=>) = lift2 (<=>) true
   fromBool = pure . fromBool
   
-instance Monoid CPrim where
-  mempty = true
-  mappend = (&&&)
-
-infix 4 .==, ./=
-
-class EqSymbolic a where
-  (.==) :: (EqSymbolic a) => a -> a -> CPrim
-  (./=) :: (EqSymbolic a) => a -> a -> CPrim
-
 type CDouble = CPrim' SDouble
 type R2 = V2 CDouble
 type P2 = Point R2
 type T2 = Transformation R2
-
-instance EqSymbolic CDouble where
-  (.==) = liftA2 (SBV..==)
-  (./=) = liftA2 (SBV../=)
 
 -- | Bogus Eq instance
 instance Eq CDouble where
@@ -322,14 +344,44 @@ instance HasBasis CDouble where
 instance Transformable CDouble where
   transform = apply
 
-deref :: Name -> CDouble
-deref n = CPrim (Set.singleton n) $ (fromJust <$> asks (M.lookup n))
+class Evaluable d s n where
+  type EvalResult d s n
+  evaluate :: n -> CPrim'' d s (EvalResult d s n)
+
+type instance V Name = SDouble
+
+instance (Applicative s) => Evaluable d s Name where
+  type EvalResult d s Name = d
+  evaluate n = CPrim (Set.singleton n) (deref n)
+    where
+      deref :: (Applicative s) => Name -> CFunc d s d
+      deref = view (from _comp) . fmap (fmap pure) . asks . M.lookup
+
+instance Evaluable SDouble Symbolic CDouble where
+  type EvalResult SDouble Symbolic CDouble = SDouble
+  evaluate = id
+
+instance (Evaluable d Symbolic a) => Evaluable d Symbolic (V2 a) where
+  type EvalResult d Symbolic (V2 a) = V2 (EvalResult d Symbolic a)
+  evaluate = traverse evaluate
+
+instance (Evaluable d IO a, EvalResult d IO a ~ Double) => Evaluable d IO (V2 a) where
+  type EvalResult d IO (V2 a) = S.R2
+  evaluate (V2 x y) = liftA2 mkR2 (evaluate x) (evaluate y)
+
+instance (Applicative s, Evaluable d s a) => Evaluable d s (Point a) where
+  type EvalResult d s (Point a) = Point (EvalResult d s a)
+  evaluate = traverse evaluate
+
+instance (Applicative s, Evaluable d s a) => Evaluable d s ([a]) where
+  type EvalResult d s ([a]) = [EvalResult d s a]
+  evaluate = traverse evaluate
 
 constraint :: CPrim -> Prim B R2
-constraint = Prim
+constraint = Prim . ConstraintPrim
 
 origin :: P2 -> CPrim
-origin p = view _x p .== 0 &&& view _y p .== 0
+origin p = fmap (.== (P (V2 0 0))) (evaluate p)
 
 spacingX :: CDouble -> [P2] -> CPrim
 spacingX sp xs = spacing sp $ map (view _x) xs
@@ -343,43 +395,35 @@ alignAxis axis xs = spacing 0 $ map project xs -- TODO: allow stuff besides 0
     project (P v) = (axis <.> v)
 
 spacing :: CDouble -> [CDouble] -> CPrim
-spacing sp (x:y:[]) = y - x .== sp
-spacing sp (x:y:xs) = y - x .== sp &&& spacing sp (y:xs)
-spacing _ _ = error "spacing: not enough values"
+spacing a b = liftA2 spacing' (evaluate a) (evaluate b)
+  where
+    spacing' sp (x:y:[]) = y - x .== sp
+    spacing' sp (x:y:xs) = y - x .== sp &&& spacing' sp (y:xs)
+    spacing' _ _ = error "spacing: not enough values"
 
 data Circle v = Circle (Maybe Name) Integer v deriving (Typeable)
-type instance V (Circle v) = v
-instance (Transformable v, v ~ V v, VectorSpace v) => Transformable (Circle v) where
+type instance V (Circle v) = V v
+instance (Transformable v) => Transformable (Circle v) where
   transform tr (Circle nm i v) = Circle nm i (transform tr v)
 
-instance Renderable (Circle R2) Constraint where
-  render Constraint (Circle mbname n (V2 xc yc)) = R . modify $ f
+instance Renderable (Circle P2) Constraint where
+  render Constraint (Circle mbname n vc) = R . modify $ f
    where
     f cs = cs
-            { comp = comp cs <> ((CPrim (Set.fromList [xname, yname]) $ do
-                 (x,y) <- asks getPt
-                 return $ \x' y' -> (SBV.&&&) ((SBV..==) x x') ((SBV..==) y y')
-               ) <*> xc <*> yc)
-            , rFunc = tweak (rFunc cs)
+            { comp = comp cs &&& liftA2 (.==) (evaluate vc) (evaluate pt)
+            , rFunc = liftA2 (<>) (rFunc cs) (drawCircle <$> evaluate pt)
             , nameSupply = maybe (nameSupply cs + 1) (const $ nameSupply cs) mbname }
      where
       name = fromMaybe (Constraint .> nameSupply cs) mbname
       xname = name .> XB
       yname = name .> YB
-      tweak r = do
-        dia <- r
-        pt <- asks getPt
-        return $ dia <> (S.moveTo (S.p2 pt) $ circle 10 <> (text (show n) # fontSize (Output 14)))
-      getPt :: Map Name d -> (d,d)
-      getPt mp = (x,y)
-       where
-        Just x = M.lookup xname mp
-        Just y = M.lookup yname mp
+      pt = P (V2 xname yname)
+      drawCircle xy = S.moveTo xy $ circle 10 <> (text (show n) # fontSize (Output 14))
 
-data CState = CS { comp :: CPrim, rFunc :: ReaderT (Map Name Double) IO (Diagram S.SVG S.R2), nameSupply :: Integer }
+data CState = CS { comp :: CPrim, rFunc :: CPrim'' Double IO (Diagram S.SVG S.R2), nameSupply :: Integer }
 
 instance Default CState where
-  def = CS mempty (return S.mempty) 0
+  def = CS empty (pure mempty) 0
 
 instance Backend B R2 where
   data Render  B R2 = R { unR :: State CState () }
@@ -402,9 +446,9 @@ runSolver (CS (CPrim vars fun) r _) = do
           varMap <- M.fromList <$> flip mapM varL (\n -> do
             var <- free (show n) :: Symbolic SDouble
             return (n,var))
-          b <- runReaderT fun varMap
+          b <- fromMaybe (pure true) $ runCFunc fun varMap
           return b
         let strmodel = getModelDictionary result
-            model = M.fromList (zip varL (map (fromCW . fromJust . flip M.lookup strmodel . show) varL))
+            model = M.fromList (zip varL (map (fromCW . fromJust . flip M.lookup strmodel . show) varL)) :: Map Name Double
         putStrLn (show model)
-        runReaderT r model
+        fromMaybe (pure mempty) $ runCFunc (cFunc r) model

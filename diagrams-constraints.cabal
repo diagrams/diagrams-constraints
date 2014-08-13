@@ -38,5 +38,6 @@ Library
                      , vector-space-points
                      , containers, dual-tree
                      , monoid-extras
+                     , transformers  >= 0.4
   Ghc-options:         -Wall
   Default-language:  Haskell2010

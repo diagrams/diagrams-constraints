@@ -3,6 +3,7 @@ module CMears where
 import           Diagrams.Core.Names
 import           Diagrams.Core.Types
 import           Diagrams.Core.Compile
+import           Diagrams.TwoD.Types hiding (p2)
 import Diagrams.Prelude ((#),centerXY,pad,bg,white)
 
 import           Data.AffineSpace.Point(Point(..))
@@ -40,15 +41,12 @@ dia = mconcat . map toQD $ map Prim (reverse circs) ++ [go]
          -- p1 at origin
          , origin p1
          ]
-    [p1,p2,p3,p4,p5,p6] = mkPts
+    [p1,p2,p3,p4,p5,p6] = ptvars
     nums = [1..6] :: [Integer]
     pts = map (("p"++) . show) nums
-    toCD = deref . toName
-    ptvars :: [R2]
-    ptvars = [ V2 (toCD (pt++"x")) (toCD (pt++"y")) | pt <- pts]
-    mkPts :: [P2]
-    mkPts = map P ptvars
-    circs :: [Circle R2]
+    ptvars :: [P2]
+    ptvars = [ P $ V2 (evaluate $ pt .> XB) (evaluate $ pt .> YB) | pt <- pts]
+    circs :: [Circle P2]
     circs = map (\(n,i,p) -> Circle (Just $ toName n) i p) (zip3 pts nums ptvars)
 
 main :: IO ()
