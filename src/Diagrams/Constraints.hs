@@ -33,20 +33,16 @@ import Prelude hiding (mapM, mapM_)
 import           Control.Applicative
 import           Control.Lens.Type
 import           Control.Lens.Wrapped
-import           Control.Lens(iso,view,(^.),from,mapping,_1,_2)
+import           Control.Lens(iso,view,from,mapping)
 import           Control.Monad.Reader(Reader,reader,runReader,ReaderT(..),asks)
 import           Control.Monad.State(State,modify,execState)
 import           Data.Functor.Compose
 
-import           Diagrams.Coordinates
-import           Diagrams.Core.Names
+import           Diagrams.Prelude hiding (view,(|||),project)
+import           Diagrams.TwoD.Types.Generic
 import           Diagrams.Core.Types
-import           Diagrams.Core (Transformation,Transformable(..),V,apply)
-import           Diagrams.Angle
 import           Diagrams.TwoD.Types
 import qualified Diagrams.Backend.SVG as S
-import qualified Diagrams.Prelude as S
-import Diagrams.Prelude ((#),circle,text,fontSize)
 
 import           Data.AffineSpace.Point(Point(..))
 import           Data.Basis
@@ -56,24 +52,21 @@ import           Data.Foldable
 import           Data.Map(Map)
 import qualified Data.Map as M
 import           Data.Maybe(fromJust,fromMaybe)
-import           Data.Monoid
 import           Data.SBV hiding ((#),(.>),name)
 import           Data.Set (Set)
 import qualified Data.Set as Set
 import           Data.Traversable
 import           Data.Tree
-import           Data.VectorSpace hiding (project)
 
+----------------------------
+-- SBV <-> diagrams-lib glue
 deriving instance Foldable Point
 deriving instance Traversable Point
-
-instance (EqSymbolic v) => EqSymbolic (Point v) where
-  (P a) .== (P b) = a .== b
-
 instance IsName R2Basis
 deriving instance Typeable SBV
 
 type instance V SDouble = SDouble
+type instance V Name = SDouble
 
 -- ScalarType from http://hackage.haskell.org/package/vector-space-0.8.7/docs/src/Data-AdditiveGroup.html#AdditiveGroup
 instance AdditiveGroup SDouble where
@@ -95,102 +88,11 @@ instance HasBasis SDouble where
 instance Transformable SDouble where
   transform = apply
 
-data V2 a = V2 a a
-  deriving (Eq, Typeable, Functor, Foldable, Traversable)
-
-type ScalarR2 a = (ScalarR2Ish a)
-
-instance (ScalarR2 a) => AdditiveGroup (V2 a) where
-  zeroV = V2 0 0
-  V2 x1 y1 ^+^ V2 x2 y2 = V2 (x1 + x2) (y1 + y2)
-  negateV (V2 x y) = V2 (-x) (-y)
-
-instance (ScalarR2 a) => Num (V2 a) where
-  (+)                 = (^+^)
-  V2 x1 y1 * V2 x2 y2 = V2 (x1 * x2) (y1 * y2)  -- this is sort of bogus
-  (-)                 = (^-^)
-  negate              = negateV
-  abs (V2 x y)        = V2 (abs x) (abs y)
-  signum (V2 x y)     = V2 (signum x) (signum y)
-  fromInteger i       = V2 i' i'
-    where i' = fromInteger i
-
-instance (ScalarR2 a) => Fractional (V2 a) where
-  V2 x1 y1 / V2 x2 y2 = V2 (x1/x2) (y1/y2)
-  recip (V2 x y) = V2 (recip x) (recip y)
-  fromRational r = V2 r' r'
-    where r' = fromRational r
-
-instance (ScalarR2 a, Show a) => Show (V2 a) where
-  showsPrec p (V2 x y) = showParen (p >= 7) $
-    showCoord x . showString " ^& " . showCoord y
-   where
-    showCoord = showParen True . shows
-
--- | Lens wrapped isomorphisms for V2.
-instance (ScalarR2 a) => Wrapped (V2 a) where
-    type Unwrapped (V2 a) = (a, a)
-    _Wrapped' = iso unr2 r2
-    {-# INLINE _Wrapped' #-}
-
-instance (ScalarR2 a) => Rewrapped (V2 a) (V2 a)
-
-type instance V (V2 a) = V2 a
-
-instance (ScalarR2 a) => VectorSpace (V2 a) where
-  type Scalar (V2 a) = a
-  s *^ V2 x y = V2 (s*x) (s*y)
-
-instance (ScalarR2 a) => HasBasis (V2 a) where
-  type Basis (V2 a) = R2Basis
-  basisValue XB          = V2 1 0
-  basisValue YB          = V2 0 1
-
-  decompose (V2 x y)             = [(XB, x), (YB, y)]
-
-  decompose' (V2 x _) (XB)  = x
-  decompose' (V2 _ y) (YB) = y
-
-instance (ScalarR2 a) => InnerSpace (V2 a) where
-  (V2 x1 y1) <.> (V2 x2 y2) = x1*x2 + y1*y2
-
-instance (ScalarR2 a) => Coordinates (V2 a) where
-  type FinalCoord (V2 a)    = a
-  type PrevDim (V2 a)       = a
-  type Decomposition (V2 a) = a :& a
-
-  x ^& y           = V2 x y
-  coords (V2 x y) = x :& y
-
-instance (ScalarR2 a) => HasX (V2 a) where
-    _x = r2Iso . _1
-
-instance (ScalarR2 a) => HasY (V2 a) where
-    _y = r2Iso . _2
-
-instance (ScalarR2 a) => HasTheta (V2 a) where
-    _theta = polar._2
-
-instance (ScalarR2 a) => HasR (V2 a) where
-    _r = polar._1
-
-instance (ScalarR2 a) => Polar (V2 a) where
-    polar =
-        iso (\v -> ( magnitude v, atan2A (v^._y) (v^._x)))
-            (\(r,θ) -> V2 (r * cosA θ) (r * sinA θ))
-
-instance (ScalarR2 a) => Transformable (V2 a) where
-  transform = apply
-
 instance (EqSymbolic a) => EqSymbolic (V2 a) where
   (V2 x1 y1) .== (V2 x2 y2) = x1 .== x2 &&& y1 .== y2
 
--- | Constraint type token
-data Constraint = Constraint deriving (Typeable, Eq, Ord, Show)
-
-instance IsName Constraint -- for generated names
-
-type B = Constraint
+instance (EqSymbolic v) => EqSymbolic (Point v) where
+  (P a) .== (P b) = a .== b
 
 -- A large Applicative stack
 type CFunc d s = ReaderT (Map Name d) (Compose Maybe s)
@@ -223,24 +125,45 @@ instance Applicative s => Alternative (CPrim'' d s) where
   empty = CPrim mempty empty
   (CPrim v1 a) <|> (CPrim v2 b) = CPrim (v1 <> v2) (a <|> b)
 
-type CPrim = CPrim' SBool
+class Evaluable d s n where
+  type EvalResult d s n
+  evaluate :: n -> CPrim'' d s (EvalResult d s n)
 
--- | Primitive constraint operation
-newtype CPrimPrim = ConstraintPrim { getConstraint :: CPrim' SBool } deriving (Typeable,Show)
+instance (Applicative s) => Evaluable d s Name where
+  type EvalResult d s Name = d
+  evaluate n = CPrim (Set.singleton n) (deref n)
+    where
+      deref :: (Applicative s) => Name -> CFunc d s d
+      deref = view (from _comp) . fmap (fmap pure) . asks . M.lookup
 
-type instance V CPrimPrim = R2
+instance Evaluable d s (CPrim'' d s a) where
+  type EvalResult d s (CPrim'' d s a) = a
+  evaluate = id
 
-instance Transformable CPrimPrim where
-  transform _ = id
+instance (Applicative s, Evaluable d s a) => Evaluable d s ([a]) where
+  type EvalResult d s ([a]) = [EvalResult d s a]
+  evaluate = traverse evaluate
 
-instance Renderable CPrimPrim Constraint where
-  render Constraint (ConstraintPrim x) = R . modify $ \cs -> cs { comp = x &&& comp cs}
+instance (Applicative s, Evaluable d s a) => Evaluable d s (Point a) where
+  type EvalResult d s (Point a) = Point (EvalResult d s a)
+  evaluate = traverse evaluate
+
+instance (Evaluable d IO a, EvalResult d IO a ~ Double) => Evaluable d IO (V2 a) where
+  type EvalResult d IO (V2 a) = S.R2
+  evaluate (V2 x y) = liftA2 mkR2 (evaluate x) (evaluate y)
+
+instance (Evaluable d Symbolic a) => Evaluable d Symbolic (V2 a) where
+  type EvalResult d Symbolic (V2 a) = V2 (EvalResult d Symbolic a)
+  evaluate = traverse evaluate
+
+-- Wrapped Boolean
+type CBool = CPrim' SBool
 
 -- We lift the operators with left/right identities to consider empty as the identity
-lift2 :: (SBool -> SBool -> SBool) -> CPrim -> (CPrim -> CPrim -> CPrim)
+lift2 :: (SBool -> SBool -> SBool) -> CBool -> (CBool -> CBool -> CBool)
 lift2 f df a b = liftA2 f (a <|> df) (b <|> df)
 
-instance Boolean CPrim where
+instance Boolean CBool where
   true = pure true
   false = pure false
   bnot = fmap bnot
@@ -253,10 +176,8 @@ instance Boolean CPrim where
   (<=>) = lift2 (<=>) true
   fromBool = pure . fromBool
   
+-- Wrapped Double
 type CDouble = CPrim' SDouble
-type R2 = V2 CDouble
-type P2 = Point R2
-type T2 = Transformation R2
 
 -- | Bogus Eq instance
 instance Eq CDouble where
@@ -344,63 +265,53 @@ instance HasBasis CDouble where
 instance Transformable CDouble where
   transform = apply
 
-class Evaluable d s n where
-  type EvalResult d s n
-  evaluate :: n -> CPrim'' d s (EvalResult d s n)
+type R2 = V2 CDouble
+type P2 = Point R2
+type T2 = Transformation R2
 
-type instance V Name = SDouble
-
-instance (Applicative s) => Evaluable d s Name where
-  type EvalResult d s Name = d
-  evaluate n = CPrim (Set.singleton n) (deref n)
-    where
-      deref :: (Applicative s) => Name -> CFunc d s d
-      deref = view (from _comp) . fmap (fmap pure) . asks . M.lookup
-
-instance Evaluable SDouble Symbolic CDouble where
-  type EvalResult SDouble Symbolic CDouble = SDouble
-  evaluate = id
-
-instance (Evaluable d Symbolic a) => Evaluable d Symbolic (V2 a) where
-  type EvalResult d Symbolic (V2 a) = V2 (EvalResult d Symbolic a)
-  evaluate = traverse evaluate
-
-instance (Evaluable d IO a, EvalResult d IO a ~ Double) => Evaluable d IO (V2 a) where
-  type EvalResult d IO (V2 a) = S.R2
-  evaluate (V2 x y) = liftA2 mkR2 (evaluate x) (evaluate y)
-
-instance (Applicative s, Evaluable d s a) => Evaluable d s (Point a) where
-  type EvalResult d s (Point a) = Point (EvalResult d s a)
-  evaluate = traverse evaluate
-
-instance (Applicative s, Evaluable d s a) => Evaluable d s ([a]) where
-  type EvalResult d s ([a]) = [EvalResult d s a]
-  evaluate = traverse evaluate
-
-constraint :: CPrim -> Prim B R2
+constraint :: CBool -> Prim B R2
 constraint = Prim . ConstraintPrim
 
-origin :: P2 -> CPrim
+origin :: P2 -> CBool 
 origin p = fmap (.== (P (V2 0 0))) (evaluate p)
 
-spacingX :: CDouble -> [P2] -> CPrim
+spacingX :: CDouble -> [P2] -> CBool 
 spacingX sp xs = spacing sp $ map (view _x) xs
 
-spacingY :: CDouble -> [P2] -> CPrim
+spacingY :: CDouble -> [P2] -> CBool 
 spacingY sp xs = spacing sp $ map (view _y) xs
 
-alignAxis :: R2 -> [P2] -> CPrim
+alignAxis :: R2 -> [P2] -> CBool 
 alignAxis axis xs = spacing 0 $ map project xs -- TODO: allow stuff besides 0
   where
     project (P v) = (axis <.> v)
 
-spacing :: CDouble -> [CDouble] -> CPrim
+spacing :: CDouble -> [CDouble] -> CBool 
 spacing a b = liftA2 spacing' (evaluate a) (evaluate b)
   where
     spacing' sp (x:y:[]) = y - x .== sp
     spacing' sp (x:y:xs) = y - x .== sp &&& spacing' sp (y:xs)
     spacing' _ _ = error "spacing: not enough values"
 
+-- | Constraint type token
+data Constraint = Constraint deriving (Typeable, Eq, Ord, Show)
+
+instance IsName Constraint -- for generated names
+
+type B = Constraint
+
+-- | Primitive constraint operation
+newtype CPrimPrim = ConstraintPrim { getConstraint :: CPrim' SBool } deriving (Typeable,Show)
+
+type instance V CPrimPrim = R2
+
+instance Transformable CPrimPrim where
+  transform _ = id
+
+instance Renderable CPrimPrim Constraint where
+  render Constraint (ConstraintPrim x) = R . modify $ \cs -> cs { comp = x &&& comp cs}
+
+-- | Test rendering primitive
 data Circle v = Circle (Maybe Name) Integer v deriving (Typeable)
 type instance V (Circle v) = V v
 instance (Transformable v) => Transformable (Circle v) where
@@ -418,9 +329,9 @@ instance Renderable (Circle P2) Constraint where
       xname = name .> XB
       yname = name .> YB
       pt = P (V2 xname yname)
-      drawCircle xy = S.moveTo xy $ circle 10 <> (text (show n) # fontSize (Output 14))
+      drawCircle xy = moveTo xy $ circle 10 <> (text (show n) # fontSize (Output 14))
 
-data CState = CS { comp :: CPrim, rFunc :: CPrim'' Double IO (Diagram S.SVG S.R2), nameSupply :: Integer }
+data CState = CS { comp :: CBool, rFunc :: CPrim'' Double IO (Diagram S.SVG S.R2), nameSupply :: Integer }
 
 instance Default CState where
   def = CS empty (pure mempty) 0
@@ -429,11 +340,18 @@ instance Backend B R2 where
   data Render  B R2 = R { unR :: State CState () }
   type Result  B R2 = IO (Diagram S.SVG S.R2)
   data Options B R2 = Options
+     { finalAdjustments :: Diagram S.SVG S.R2 -> Diagram S.SVG S.R2
+     , renderOpts :: Options S.SVG S.R2
+     }
 
-  renderRTree Constraint Options rt = do
+  renderRTree Constraint opts rt = do
         let R st = toRender rt
             cstate = execState st def
-        runSolver cstate
+        dia <- runSolver cstate
+        return $ finalAdjustments opts dia
+
+instance Default (Options B R2) where
+  def = Options id undefined
 
 toRender :: Tree (RNode B R2 Annotation) -> Render B R2
 toRender (Node (RPrim p) _) = render Constraint p
