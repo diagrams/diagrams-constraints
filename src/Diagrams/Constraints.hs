@@ -438,6 +438,8 @@ instance Backend B R2 where
 toRender :: Tree (RNode B R2 Annotation) -> Render B R2
 toRender (Node (RPrim p) _) = render Constraint p
 toRender (Node REmpty rs) = R $ mapM_ (unR . toRender) rs
+toRender (Node (RStyle _) rs) = R $ mapM_ (unR . toRender) rs
+toRender (Node (RAnnot _) rs) = R $ mapM_ (unR . toRender) rs
 
 runSolver :: CState -> Result B R2
 runSolver (CS (CPrim vars fun) r _) = do

@@ -23,8 +23,28 @@ Source-repository head
 
 Library
   Exposed-modules:     Diagrams.Constraints
-  Other-modules: CMears Example
+  Hs-source-dirs:      src
+  Build-depends:       base          >= 4.3
+                     , vector-space  >= 0.7
+                     , colour
+                     , diagrams-core >= 1.2
+                     , diagrams-lib  >= 1.2
+                     , diagrams-svg  >= 1.1
+                     , sbv           >= 3.1
+                     , lens          >= 4.2
+                     , mtl           >= 2.2
+                     , data-default
+                     , vector-space-points
+                     , containers, dual-tree
+                     , monoid-extras
+                     , transformers  >= 0.4
+  Ghc-options:         -Wall
+  Default-language:  Haskell2010
+
+Executable cmears
+  Main-is: CMears.hs
   Hs-source-dirs:      src examples
+  Other-modules: Example
   Build-depends:       base          >= 4.3
                      , vector-space  >= 0.7
                      , colour

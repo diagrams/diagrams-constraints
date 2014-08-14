@@ -1,4 +1,4 @@
-module CMears where
+module Main where
 
 import           Diagrams.Core.Names
 import           Diagrams.Core.Types
