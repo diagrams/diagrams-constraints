@@ -16,10 +16,11 @@ import Diagrams.Constraints
 
 -- based on https://github.com/diagrams/diagrams-lib/issues/8#issuecomment-16298660
 
+-- | I don't know how to make envelopes/traces yet (they need a real Ord instance) so skip those for now
 toQD :: Prim b v -> QDiagram b v m
 toQD p = QD $ D.leaf empty (PrimLeaf p)
 
--- this just draws labeled circles at the points determined by the solver
+-- | This just draws labeled circles at the points determined by the solver
 dia :: Diagram B R2
 dia = mconcat . map toQD $ map Prim (reverse circs) ++ [go]
   where

@@ -68,54 +68,59 @@ deriving instance Typeable SBV
 type instance V SDouble = SDouble
 type instance V Name = SDouble
 
--- ScalarType from http://hackage.haskell.org/package/vector-space-0.8.7/docs/src/Data-AdditiveGroup.html#AdditiveGroup
+-- | ScalarType instance from http://hackage.haskell.org/package/vector-space-0.8.7/docs/src/Data-AdditiveGroup.html#AdditiveGroup
 instance AdditiveGroup SDouble where
   zeroV = 0
   (^+^) = (+)
   negateV = negate
--- ScalarType from http://hackage.haskell.org/package/vector-space-0.8.7/docs/src/Data-VectorSpace.html
+-- | ScalarType instance from http://hackage.haskell.org/package/vector-space-0.8.7/docs/src/Data-VectorSpace.html
 instance VectorSpace SDouble where
   type Scalar SDouble = SDouble
   (*^) = (*)
+-- | ScalarType instance from http://hackage.haskell.org/package/vector-space-0.8.7/docs/src/Data-VectorSpace.html
 instance InnerSpace SDouble where (<.>) = (*)
--- ScalarType from http://hackage.haskell.org/package/vector-space-0.8.7/docs/src/Data-Basis.html#HasBasis
+-- | ScalarType instance from http://hackage.haskell.org/package/vector-space-0.8.7/docs/src/Data-Basis.html#HasBasis
 instance HasBasis SDouble where
   type Basis SDouble = ()
   basisValue ()  = 1
   decompose s    = [((),s)]
   decompose' s   = const s
 
+-- | Scalar instance from diagrams-core
 instance Transformable SDouble where
   transform = apply
 
+-- | These instances should be automatic...
 instance (EqSymbolic a) => EqSymbolic (V2 a) where
   (V2 x1 y1) .== (V2 x2 y2) = x1 .== x2 &&& y1 .== y2
 
+-- | These instances should be automatic...
 instance (EqSymbolic v) => EqSymbolic (Point v) where
   (P a) .== (P b) = a .== b
 
--- A large Applicative stack
+-- | An Applicative stack.  It takes a map from names to d's and returns Nothing if any of the required names are missing. See 'runCFunc' for the unrolled type.
 type CFunc d s = ReaderT (Map Name d) (Compose Maybe s)
 
+-- | TODO
 instance Show (CFunc d s x) where
-  show _ = "<CFunc>" -- TODO
+  show _ = "<CFunc>" 
 
+-- | Run a 'CFunc'.
 runCFunc :: CFunc d s x -> Map Name d -> Maybe (s x)
 runCFunc f mp = getCompose $ runReaderT f mp
 
--- Lenses to make my life easier
-
+-- | A lens for Reader. No idea where it properly belongs.
 readerLens :: Iso' (r -> a) (Reader r a)
 readerLens = iso reader runReader
 
+-- | A lens to work directly with the Maybe part of the computation.
 _comp :: Iso' (CFunc d s x) (Reader (Map Name d) (Maybe (s x)))
 _comp = _Wrapped . readerLens . mapping _Wrapped
 
--- CPrim' is Applicative and Alternative
+-- | CPrim'' keeps track of the names that the 'CFunc' needs. Ideally this should be abstract and only expose the evaluate function of 'Evaluable d s Name' and its instances. It also needs a better name.
 data CPrim'' d s x = CPrim { variables :: (Set Name), cFunc :: CFunc d s x } deriving (Typeable, Functor, Show)
 
-type CPrim' = CPrim'' SDouble Symbolic
-
+-- | CPrim'' is Applicative and Alternative, but not a Monad.
 instance Applicative s => Applicative (CPrim'' d s) where
   pure = CPrim mempty . pure
   (CPrim v1 f) <*> (CPrim v2 x) = CPrim (v1 <> v2) (f <*> x)
@@ -125,10 +130,12 @@ instance Applicative s => Alternative (CPrim'' d s) where
   empty = CPrim mempty empty
   (CPrim v1 a) <|> (CPrim v2 b) = CPrim (v1 <> v2) (a <|> b)
 
+-- | An 'Evaluable' n can be evaluated in the 'CPrim''' monad to give an 'EvalResult d s n'
 class Evaluable d s n where
   type EvalResult d s n
   evaluate :: n -> CPrim'' d s (EvalResult d s n)
 
+-- | Evaluating Names dereferences them from the name map.
 instance (Applicative s) => Evaluable d s Name where
   type EvalResult d s Name = d
   evaluate n = CPrim (Set.singleton n) (deref n)
@@ -136,30 +143,38 @@ instance (Applicative s) => Evaluable d s Name where
       deref :: (Applicative s) => Name -> CFunc d s d
       deref = view (from _comp) . fmap (fmap pure) . asks . M.lookup
 
+-- | Evaluating computations returns the computation unchanged.
 instance Evaluable d s (CPrim'' d s a) where
   type EvalResult d s (CPrim'' d s a) = a
   evaluate = id
 
+-- | Other instance for a Traversable type
 instance (Applicative s, Evaluable d s a) => Evaluable d s ([a]) where
   type EvalResult d s ([a]) = [EvalResult d s a]
   evaluate = traverse evaluate
 
+-- | Other instance for a Traversable type
 instance (Applicative s, Evaluable d s a) => Evaluable d s (Point a) where
   type EvalResult d s (Point a) = Point (EvalResult d s a)
   evaluate = traverse evaluate
 
+-- | Evaluating V2 in IO results in an R2. This is a good reason to standardize on V2 across all libraries, as if it were standardized then I could just use traverse.
 instance (Evaluable d IO a, EvalResult d IO a ~ Double) => Evaluable d IO (V2 a) where
   type EvalResult d IO (V2 a) = S.R2
   evaluate (V2 x y) = liftA2 mkR2 (evaluate x) (evaluate y)
 
+-- | See how nice 'traverse' is?
 instance (Evaluable d Symbolic a) => Evaluable d Symbolic (V2 a) where
   type EvalResult d Symbolic (V2 a) = V2 (EvalResult d Symbolic a)
   evaluate = traverse evaluate
 
--- Wrapped Boolean
+-- | CPrim'' specialized to be over the sbv package's monad and use only 'SDouble'. Ideally we would be able to store other types, such as 'SInteger', but I haven't had yet integrated the vault package (which will replace Map when integrated).
+type CPrim' = CPrim'' SDouble Symbolic
+
+-- | A wrapped computation that returns a boolean value.
 type CBool = CPrim' SBool
 
--- We lift the operators with left/right identities to consider empty as the identity
+-- | Lift the operator to consider empty / Nothing as the identity df
 lift2 :: (SBool -> SBool -> SBool) -> CBool -> (CBool -> CBool -> CBool)
 lift2 f df a b = liftA2 f (a <|> df) (b <|> df)
 
@@ -176,10 +191,10 @@ instance Boolean CBool where
   (<=>) = lift2 (<=>) true
   fromBool = pure . fromBool
   
--- Wrapped Double
+-- | A wrapped computation that returns a Double value. Instance of many numeric types.
 type CDouble = CPrim' SDouble
 
--- | Bogus Eq instance
+-- | A bogus Eq instance
 instance Eq CDouble where
   _ == _ = error "cannot compare CPrim' values"
 
@@ -222,12 +237,15 @@ instance Floating CDouble where
   acosh = fmap acosh
   atanh = fmap atanh
 
+-- | bogus
 instance Real CDouble where
   toRational = error "cannot read from CDouble"
 
+-- | bogus
 instance RealFrac CDouble where
   properFraction = error "cannot read from CDouble"
 
+-- | bogus except for atan2 and a few others
 instance RealFloat CDouble where
   floatRadix = error "cannot read from CDouble"
   floatDigits = error "cannot read from CDouble"
@@ -265,27 +283,32 @@ instance HasBasis CDouble where
 instance Transformable CDouble where
   transform = apply
 
+-- | Pairs of computations of doubles.
 type R2 = V2 CDouble
+-- | Synonym for brevity
 type P2 = Point R2
+-- | Another synonym for brevity (not currently used IIRC)
 type T2 = Transformation R2
 
-constraint :: CBool -> Prim B R2
-constraint = Prim . ConstraintPrim
-
+-- | True if the given point is at the origin
 origin :: P2 -> CBool 
 origin p = fmap (.== (P (V2 0 0))) (evaluate p)
 
+-- | True if the given points are spaced horizontally at the given spacing
 spacingX :: CDouble -> [P2] -> CBool 
 spacingX sp xs = spacing sp $ map (view _x) xs
 
+-- | True if the given points are spaced vertically at the given spacing
 spacingY :: CDouble -> [P2] -> CBool 
 spacingY sp xs = spacing sp $ map (view _y) xs
 
+-- | True if the given points are all on the given slope/axis.
 alignAxis :: R2 -> [P2] -> CBool 
 alignAxis axis xs = spacing 0 $ map project xs -- TODO: allow stuff besides 0
   where
     project (P v) = (axis <.> v)
 
+-- | True if the given values are spaced with the given spacing
 spacing :: CDouble -> [CDouble] -> CBool 
 spacing a b = liftA2 spacing' (evaluate a) (evaluate b)
   where
@@ -293,25 +316,33 @@ spacing a b = liftA2 spacing' (evaluate a) (evaluate b)
     spacing' sp (x:y:xs) = y - x .== sp &&& spacing' sp (y:xs)
     spacing' _ _ = error "spacing: not enough values"
 
--- | Constraint type token
+-- | Constraint type token for the backend
 data Constraint = Constraint deriving (Typeable, Eq, Ord, Show)
 
-instance IsName Constraint -- for generated names
+-- | Constraint is used as a token for generated names
+instance IsName Constraint 
 
+-- | Synonym to allow switching backends easily
 type B = Constraint
 
--- | Primitive constraint operation
-newtype CPrimPrim = ConstraintPrim { getConstraint :: CPrim' SBool } deriving (Typeable,Show)
+-- | Primitive constraint operation. Ensures that the given CBool is true.
+newtype ConstraintPrim = ConstraintPrim { getConstraint :: CBool } deriving (Typeable,Show)
 
-type instance V CPrimPrim = R2
+type instance V ConstraintPrim = R2 -- todo: ConstraintPrim should take some more type parameters
 
-instance Transformable CPrimPrim where
+-- | Constraint primitives do not transform.
+instance Transformable ConstraintPrim where
   transform _ = id
 
-instance Renderable CPrimPrim Constraint where
+-- | Constraint primitives are passed only to the solver.
+instance Renderable ConstraintPrim Constraint where
   render Constraint (ConstraintPrim x) = R . modify $ \cs -> cs { comp = x &&& comp cs}
 
--- | Test rendering primitive
+-- | Wrap a boolean computation as a primitive that constraints the boolean to be true
+constraint :: CBool -> Prim B R2
+constraint = Prim . ConstraintPrim
+
+-- | Test rendering primitive. Draws a fixed-size circle containing the given Integer at the given point, while naming the point using the given name (if given).
 data Circle v = Circle (Maybe Name) Integer v deriving (Typeable)
 type instance V (Circle v) = V v
 instance (Transformable v) => Transformable (Circle v) where
@@ -331,6 +362,8 @@ instance Renderable (Circle P2) Constraint where
       pt = P (V2 xname yname)
       drawCircle xy = moveTo xy $ circle 10 <> (text (show n) # fontSize (Output 14))
 
+-- | The computation state during solving/rendering. This is pure state with no instances besides 'Default' due to the 'nameSupply'.
+-- | 'comp' is built up to be the constraint computation passed to the solver, while 'rFunc' takes the solver's computed values and produces a diagram.
 data CState = CS { comp :: CBool, rFunc :: CPrim'' Double IO (Diagram S.SVG S.R2), nameSupply :: Integer }
 
 instance Default CState where
@@ -338,9 +371,11 @@ instance Default CState where
 
 instance Backend B R2 where
   data Render  B R2 = R { unR :: State CState () }
-  type Result  B R2 = IO (Diagram S.SVG S.R2)
+  type Result  B R2 = IO (Diagram S.SVG S.R2) -- todo: allow other backends besides SVG and use their renderDia rather than just returning a diagram
   data Options B R2 = Options
-     { finalAdjustments :: Diagram S.SVG S.R2 -> Diagram S.SVG S.R2
+     { -- | Adjustments to make to the final diagram before passing it off to the real rendering backend.
+       finalAdjustments :: Diagram S.SVG S.R2 -> Diagram S.SVG S.R2
+       -- | Options for the real rendering backend (currently unimplemented)
      , renderOpts :: Options S.SVG S.R2
      }
 
@@ -353,12 +388,14 @@ instance Backend B R2 where
 instance Default (Options B R2) where
   def = Options id undefined
 
+-- | Convert an RTree into the state monad used for rendering
 toRender :: Tree (RNode B R2 Annotation) -> Render B R2
 toRender (Node (RPrim p) _) = render Constraint p
 toRender (Node REmpty rs) = R $ mapM_ (unR . toRender) rs
 toRender (Node (RStyle _) rs) = R $ mapM_ (unR . toRender) rs
 toRender (Node (RAnnot _) rs) = R $ mapM_ (unR . toRender) rs
 
+-- | Solve the constraints
 runSolver :: CState -> Result B R2
 runSolver (CS (CPrim vars fun) r _) = do
         let varL = Set.elems vars
