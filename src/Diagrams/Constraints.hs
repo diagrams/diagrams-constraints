@@ -38,14 +38,12 @@ import           Control.Monad.Reader(Reader,reader,runReader,ReaderT(..),asks)
 import           Control.Monad.State(State,modify,execState)
 import           Data.Functor.Compose
 
-import           Diagrams.Prelude hiding (view,(|||),project)
-import           Diagrams.TwoD.Types.Generic
+import           Diagrams.Prelude hiding (view,(|||),project, R2, P2)
 import           Diagrams.Core.Types
-import           Diagrams.TwoD.Types
+import           Diagrams.TwoD.Types hiding (R2, P2)
+import qualified Diagrams.TwoD.Types as S
 import qualified Diagrams.Backend.SVG as S
 
-import           Data.AffineSpace.Point(Point(..))
-import           Data.Basis
 import           Data.Data
 import           Data.Default
 import           Data.Foldable
@@ -60,42 +58,14 @@ import           Data.Tree
 
 ----------------------------
 -- SBV <-> diagrams-lib glue
-deriving instance Foldable Point
-deriving instance Traversable Point
-instance IsName R2Basis
 deriving instance Typeable SBV
-
-type instance V SDouble = SDouble
-type instance V Name = SDouble
-
--- | ScalarType instance from http://hackage.haskell.org/package/vector-space-0.8.7/docs/src/Data-AdditiveGroup.html#AdditiveGroup
-instance AdditiveGroup SDouble where
-  zeroV = 0
-  (^+^) = (+)
-  negateV = negate
--- | ScalarType instance from http://hackage.haskell.org/package/vector-space-0.8.7/docs/src/Data-VectorSpace.html
-instance VectorSpace SDouble where
-  type Scalar SDouble = SDouble
-  (*^) = (*)
--- | ScalarType instance from http://hackage.haskell.org/package/vector-space-0.8.7/docs/src/Data-VectorSpace.html
-instance InnerSpace SDouble where (<.>) = (*)
--- | ScalarType instance from http://hackage.haskell.org/package/vector-space-0.8.7/docs/src/Data-Basis.html#HasBasis
-instance HasBasis SDouble where
-  type Basis SDouble = ()
-  basisValue ()  = 1
-  decompose s    = [((),s)]
-  decompose' s   = const s
-
--- | Scalar instance from diagrams-core
-instance Transformable SDouble where
-  transform = apply
 
 -- | These instances should be automatic...
 instance (EqSymbolic a) => EqSymbolic (V2 a) where
   (V2 x1 y1) .== (V2 x2 y2) = x1 .== x2 &&& y1 .== y2
 
 -- | These instances should be automatic...
-instance (EqSymbolic v) => EqSymbolic (Point v) where
+instance (EqSymbolic (v a)) => EqSymbolic (Point v a) where
   (P a) .== (P b) = a .== b
 
 -- | An Applicative stack.  It takes a map from names to d's and returns Nothing if any of the required names are missing. See 'runCFunc' for the unrolled type.
@@ -154,18 +124,13 @@ instance (Applicative s, Evaluable d s a) => Evaluable d s ([a]) where
   evaluate = traverse evaluate
 
 -- | Other instance for a Traversable type
-instance (Applicative s, Evaluable d s a) => Evaluable d s (Point a) where
-  type EvalResult d s (Point a) = Point (EvalResult d s a)
+instance (Applicative s, Traversable f, Evaluable d s a) => Evaluable d s (Point f a) where
+  type EvalResult d s (Point f a) = Point f (EvalResult d s a)
   evaluate = traverse evaluate
 
--- | Evaluating V2 in IO results in an R2. This is a good reason to standardize on V2 across all libraries, as if it were standardized then I could just use traverse.
-instance (Evaluable d IO a, EvalResult d IO a ~ Double) => Evaluable d IO (V2 a) where
-  type EvalResult d IO (V2 a) = S.R2
-  evaluate (V2 x y) = liftA2 mkR2 (evaluate x) (evaluate y)
-
--- | See how nice 'traverse' is?
-instance (Evaluable d Symbolic a) => Evaluable d Symbolic (V2 a) where
-  type EvalResult d Symbolic (V2 a) = V2 (EvalResult d Symbolic a)
+-- | Other instance for a Traversable type
+instance (Applicative s, Evaluable d s a) => Evaluable d s (V2 a) where
+  type EvalResult d s (V2 a) = V2 (EvalResult d s a)
   evaluate = traverse evaluate
 
 -- | CPrim'' specialized to be over the sbv package's monad and use only 'SDouble'. Ideally we would be able to store other types, such as 'SInteger', but I haven't had yet integrated the vault package (which will replace Map when integrated).
@@ -251,44 +216,23 @@ instance RealFloat CDouble where
   floatDigits = error "cannot read from CDouble"
   floatRange = error "cannot read from CDouble"
   decodeFloat = error "cannot read from CDouble"
-  encodeFloat a b = pure $ encodeFloat a b
+  encodeFloat a b = error "x" -- pure $ encodeFloat a b
   exponent = error "cannot read from CDouble"
-  significand = fmap significand
-  scaleFloat i = fmap (scaleFloat i)
+--  significand = fmap significand
+--  scaleFloat i = fmap (scaleFloat i)
   isNaN = error "cannot read from CDouble"
   isInfinite = error "cannot read from CDouble"
   isDenormalized = error "cannot read from CDouble"
   isNegativeZero = error "cannot read from CDouble"
   isIEEE = error "cannot read from CDouble"
-  atan2 = liftA2 atan2
-
-type instance V CDouble = CDouble
-
-instance AdditiveGroup CDouble where
-  zeroV = pure zeroV
-  (^+^) = liftA2 (^+^)
-  negateV = fmap negateV
-
-instance VectorSpace CDouble where
-  type Scalar CDouble = CDouble
-  (*^) = liftA2 (*^)
-
-instance InnerSpace CDouble where (<.>) = liftA2 (<.>)
-instance HasBasis CDouble where
-  type Basis CDouble = Basis SDouble
-  basisValue = pure . basisValue
-  decompose s = [((),s)]
-  decompose' s   = const s
-
-instance Transformable CDouble where
-  transform = apply
+--  atan2 = liftA2 atan2
 
 -- | Pairs of computations of doubles.
 type R2 = V2 CDouble
 -- | Synonym for brevity
-type P2 = Point R2
+type P2 = Point V2 CDouble
 -- | Another synonym for brevity (not currently used IIRC)
-type T2 = Transformation R2
+type T2 = Transformation V2 CDouble
 
 -- | True if the given point is at the origin
 origin :: P2 -> CBool 
@@ -306,7 +250,7 @@ spacingY sp xs = spacing sp $ map (view _y) xs
 alignAxis :: R2 -> [P2] -> CBool 
 alignAxis axis xs = spacing 0 $ map project xs -- TODO: allow stuff besides 0
   where
-    project (P v) = (axis <.> v)
+    project (P v) = (axis `dot` v)
 
 -- | True if the given values are spaced with the given spacing
 spacing :: CDouble -> [CDouble] -> CBool 
@@ -325,10 +269,14 @@ instance IsName Constraint
 -- | Synonym to allow switching backends easily
 type B = Constraint
 
+type instance V B = V2
+type instance N B = CDouble
+
 -- | Primitive constraint operation. Ensures that the given CBool is true.
 newtype ConstraintPrim = ConstraintPrim { getConstraint :: CBool } deriving (Typeable,Show)
 
-type instance V ConstraintPrim = R2 -- todo: ConstraintPrim should take some more type parameters
+type instance V ConstraintPrim = V2 -- todo: ConstraintPrim should take some more type parameters
+type instance N ConstraintPrim = CDouble -- todo: ConstraintPrim should take some more type parameters
 
 -- | Constraint primitives do not transform.
 instance Transformable ConstraintPrim where
@@ -339,12 +287,13 @@ instance Renderable ConstraintPrim Constraint where
   render Constraint (ConstraintPrim x) = R . modify $ \cs -> cs { comp = x &&& comp cs}
 
 -- | Wrap a boolean computation as a primitive that constraints the boolean to be true
-constraint :: CBool -> Prim B R2
+constraint :: CBool -> Prim B V2 CDouble
 constraint = Prim . ConstraintPrim
 
 -- | Test rendering primitive. Draws a fixed-size circle containing the given Integer at the given point, while naming the point using the given name (if given).
 data Circle v = Circle (Maybe Name) Integer v deriving (Typeable)
 type instance V (Circle v) = V v
+type instance N (Circle v) = N v
 instance (Transformable v) => Transformable (Circle v) where
   transform tr (Circle nm i v) = Circle nm i (transform tr v)
 
@@ -357,26 +306,26 @@ instance Renderable (Circle P2) Constraint where
             , nameSupply = maybe (nameSupply cs + 1) (const $ nameSupply cs) mbname }
      where
       name = fromMaybe (Constraint .> nameSupply cs) mbname
-      xname = name .> XB
-      yname = name .> YB
+      xname = name .> "xb"
+      yname = name .> "yb"
       pt = P (V2 xname yname)
-      drawCircle xy = moveTo xy $ circle 10 <> (text (show n) # fontSize (Output 14))
+      drawCircle xy = moveTo xy $ circle 10 <> (text (show n) # fontSizeO 14)
 
 -- | The computation state during solving/rendering. This is pure state with no instances besides 'Default' due to the 'nameSupply'.
 -- | 'comp' is built up to be the constraint computation passed to the solver, while 'rFunc' takes the solver's computed values and produces a diagram.
-data CState = CS { comp :: CBool, rFunc :: CPrim'' Double IO (Diagram S.SVG S.R2), nameSupply :: Integer }
+data CState = CS { comp :: CBool, rFunc :: CPrim'' Double IO (Diagram S.SVG), nameSupply :: Integer }
 
 instance Default CState where
   def = CS empty (pure mempty) 0
 
-instance Backend B R2 where
-  data Render  B R2 = R { unR :: State CState () }
-  type Result  B R2 = IO (Diagram S.SVG S.R2) -- todo: allow other backends besides SVG and use their renderDia rather than just returning a diagram
-  data Options B R2 = Options
+instance Backend B V2 CDouble where
+  data Render  B V2 CDouble = R { unR :: State CState () }
+  type Result  B V2 CDouble = IO (Diagram S.SVG) -- todo: allow other backends besides SVG and use their renderDia rather than just returning a diagram
+  data Options B V2 CDouble = Options
      { -- | Adjustments to make to the final diagram before passing it off to the real rendering backend.
-       finalAdjustments :: Diagram S.SVG S.R2 -> Diagram S.SVG S.R2
+       finalAdjustments :: Diagram S.SVG -> Diagram S.SVG
        -- | Options for the real rendering backend (currently unimplemented)
-     , renderOpts :: Options S.SVG S.R2
+     , renderOpts :: Options S.SVG V2 Double
      }
 
   renderRTree Constraint opts rt = do
@@ -385,18 +334,18 @@ instance Backend B R2 where
         dia <- runSolver cstate
         return $ finalAdjustments opts dia
 
-instance Default (Options B R2) where
+instance Default (Options B V2 CDouble) where
   def = Options id undefined
 
 -- | Convert an RTree into the state monad used for rendering
-toRender :: Tree (RNode B R2 Annotation) -> Render B R2
+toRender :: Tree (RNode B V2 CDouble Annotation) -> Render B V2 CDouble
 toRender (Node (RPrim p) _) = render Constraint p
 toRender (Node REmpty rs) = R $ mapM_ (unR . toRender) rs
 toRender (Node (RStyle _) rs) = R $ mapM_ (unR . toRender) rs
 toRender (Node (RAnnot _) rs) = R $ mapM_ (unR . toRender) rs
 
 -- | Solve the constraints
-runSolver :: CState -> Result B R2
+runSolver :: CState -> Result B V2 CDouble
 runSolver (CS (CPrim vars fun) r _) = do
         let varL = Set.elems vars
         result <- satWith z3 $ do
@@ -405,6 +354,7 @@ runSolver (CS (CPrim vars fun) r _) = do
             return (n,var))
           b <- fromMaybe (pure true) $ runCFunc fun varMap
           return b
+        putStrLn (show result)
         let strmodel = getModelDictionary result
             model = M.fromList (zip varL (map (fromCW . fromJust . flip M.lookup strmodel . show) varL)) :: Map Name Double
         putStrLn (show model)

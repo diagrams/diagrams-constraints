@@ -3,8 +3,8 @@ module Main where
 import           Diagrams.Core.Names
 import           Diagrams.Core.Compile
 import           Diagrams.Core.Types
-import           Diagrams.TwoD.Types hiding (p2)
-import           Diagrams.Prelude hiding (p2,origin)
+import           Diagrams.TwoD.Types hiding (p2, R2, P2, T2)
+import           Diagrams.Prelude hiding (p2,origin, R2, P2, T2)
 
 import           Data.Default
 import qualified Data.Tree.DUAL            as D
@@ -17,11 +17,11 @@ import Diagrams.Constraints
 -- based on https://github.com/diagrams/diagrams-lib/issues/8#issuecomment-16298660
 
 -- | I don't know how to make envelopes/traces yet (they need a real Ord instance) so skip those for now
-toQD :: Prim b v -> QDiagram b v m
+toQD :: Prim b v n -> QDiagram b v n m
 toQD p = QD $ D.leaf empty (PrimLeaf p)
 
 -- | This just draws labeled circles at the points determined by the solver
-dia :: Diagram B R2
+dia :: Diagram B
 dia = mconcat . map toQD $ map Prim (reverse circs) ++ [go]
   where
     -- the layout specification
@@ -45,7 +45,7 @@ dia = mconcat . map toQD $ map Prim (reverse circs) ++ [go]
     nums = [1..6] :: [Integer]
     pts = map (("p"++) . show) nums
     ptvars :: [P2]
-    ptvars = [ mkP2 (evaluate $ pt .> XB) (evaluate $ pt .> YB) | pt <- pts]
+    ptvars = [ mkP2 (evaluate $ pt .> "xb") (evaluate $ pt .> "yb") | pt <- pts]
     circs :: [Circle P2]
     circs = map (\(n,i,p) -> Circle (Just $ toName n) i p) (zip3 pts nums ptvars)
 
